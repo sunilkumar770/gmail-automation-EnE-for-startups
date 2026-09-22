@@ -11,6 +11,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rootPosix = root.replace(/\\/g, "/");
 const out = resolve(root, "tests/.build");
 mkdirSync(out, { recursive: true });
 
@@ -23,13 +24,13 @@ const barrel = resolve(out, "lib-entry.ts");
 writeFileSync(
   barrel,
   [
-    `export * from "${root}/supabase/functions/notify-lifecycle/lib/format.ts";`,
-    `export * as states from "${root}/supabase/functions/notify-lifecycle/lib/states.ts";`,
-    `export * as retry from "${root}/supabase/functions/notify-lifecycle/lib/retry.ts";`,
-    `export * as ratelimit from "${root}/supabase/functions/notify-lifecycle/lib/ratelimit.ts";`,
-    `export * as log from "${root}/supabase/functions/notify-lifecycle/lib/log.ts";`,
-    `export * as schemas from "${root}/supabase/functions/notify-lifecycle/lib/schemas.ts";`,
-    `export * as templates from "${root}/supabase/functions/notify-lifecycle/lib/templates.ts";`,
+    `export * from "${rootPosix}/supabase/functions/notify-lifecycle/lib/format.ts";`,
+    `export * as states from "${rootPosix}/supabase/functions/notify-lifecycle/lib/states.ts";`,
+    `export * as retry from "${rootPosix}/supabase/functions/notify-lifecycle/lib/retry.ts";`,
+    `export * as ratelimit from "${rootPosix}/supabase/functions/notify-lifecycle/lib/ratelimit.ts";`,
+    `export * as log from "${rootPosix}/supabase/functions/notify-lifecycle/lib/log.ts";`,
+    `export * as schemas from "${rootPosix}/supabase/functions/notify-lifecycle/lib/schemas.ts";`,
+    `export * as templates from "${rootPosix}/supabase/functions/notify-lifecycle/lib/templates.ts";`,
   ].join("\n"),
 );
 
@@ -56,6 +57,14 @@ await esbuild.build({
   ...common,
   entryPoints: [resolve(root, "app/api/unsubscribe/route.ts")],
   outfile: resolve(out, "route-unsub.mjs"),
+  alias: { ...common.alias, "next/server": "./tests/.build/next-server-shim.mjs" },
+  external: ["next/server.js"],
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: [resolve(root, "app/api/invoices/[id]/pdf/route.ts")],
+  outfile: resolve(out, "route-pdf.mjs"),
   alias: { ...common.alias, "next/server": "./tests/.build/next-server-shim.mjs" },
   external: ["next/server.js"],
 });

@@ -350,7 +350,8 @@ test("schemas: welcome requires user_id uuid; city accepted on booking payloads"
 
 test("preview templates mirror send templates (drift guard)", async () => {
   const { readFileSync } = await import("node:fs");
-  const root = new URL("../../", import.meta.url).pathname;
+  const { fileURLToPath } = await import("node:url");
+  const root = fileURLToPath(new URL("../../", import.meta.url));
   const send = readFileSync(root + "supabase/functions/notify-lifecycle/lib/templates.ts", "utf8");
   const previews = ["emails/_layout.tsx", "emails/welcome.tsx", "emails/booking-pair.tsx"]
     .map((f) => readFileSync(root + f, "utf8")).join("\n");

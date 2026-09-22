@@ -7,7 +7,8 @@
   "scripts": {
     "build:test": "node tests/build.mjs",
     "test": "bash tests/run_all.sh",
-    "test:unit": "npm run build:test && node --test tests/unit/",
+    "test:unit": "npm run build:test && node --test tests/unit/lib.test.mjs tests/unit/downloadInvoice.test.mjs tests/unit/ciGateAndServerPdf.test.mjs",
+    "ci:gate-pdf": "node scripts/ci-gate-pdf-size.mjs",
     "test:db": "bash tests/run_db_tests.sh",
     "test:integration": "npm run build:test && node tests/integration/edge_v2.mjs && node tests/integration/routes_v2.mjs",
     "test:e2e": "npm run build:test && node tests/e2e/full_lifecycle.mjs",
@@ -17,22 +18,24 @@
     "lint": "eslint app lib supabase/functions tests"
   },
   "dependencies": {
-    "svix": "^1.99.1",
-    "@supabase/supabase-js": "^2.109.0"
+    "@supabase/supabase-js": "^2.109.0",
+    "html2pdf.js": "^0.14.0",
+    "svix": "^1.99.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@playwright/test": "^1.63.0",
+    "@react-email/components": "^1.0.12",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-email": "^6.9.5",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "zod": "^3.25.0",
-    "@types/node": "^20.0.0",
-    "@react-email/components": "^1.0.12",
-    "react-email": "^6.9.5",
-    "@types/react": "^19.0.0"
+    "zod": "^3.25.0"
   }
 }
