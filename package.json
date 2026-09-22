@@ -1,0 +1,38 @@
+{
+  "name": "gmail-automation-ene-for-startups",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Event-driven transactional & queued email system (Supabase + Resend) — v2 hardened architecture",
+  "scripts": {
+    "build:test": "node tests/build.mjs",
+    "test": "bash tests/run_all.sh",
+    "test:unit": "npm run build:test && node --test tests/unit/",
+    "test:db": "bash tests/run_db_tests.sh",
+    "test:integration": "npm run build:test && node tests/integration/edge_v2.mjs && node tests/integration/routes_v2.mjs",
+    "test:e2e": "npm run build:test && node tests/e2e/full_lifecycle.mjs",
+    "test:chaos": "npm run build:test && bash tests/kill_stale.sh >/dev/null 2>&1; TEST_DB=gr_v2_it node tests/chaos/parallel_drains.mjs && TEST_DB=gr_v2_it bash tests/chaos/concurrency_claim_test.sh && TEST_DB=gr_v2_it bash tests/chaos/concurrent_suppression.sh",
+    "test:security": "npm run build:test && node tests/security/security_tests.mjs",
+    "typecheck": "bash tests/typecheck.sh",
+    "lint": "eslint app lib supabase/functions tests"
+  },
+  "dependencies": {
+    "svix": "^1.99.1",
+    "@supabase/supabase-js": "^2.109.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "zod": "^3.25.0",
+    "@types/node": "^20.0.0",
+    "@react-email/components": "^1.0.12",
+    "react-email": "^6.9.5",
+    "@types/react": "^19.0.0"
+  }
+}
