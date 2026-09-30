@@ -4,7 +4,7 @@
 // Deploy:  supabase functions deploy notify-lifecycle --no-verify-jwt
 // Secrets: supabase secrets set RESEND_API_KEY=re_xxx \
 //            EMAIL_INTERNAL_SECRET=<same 32-byte hex as Vault entry> \
-//            RESEND_FROM_EMAIL="GoRentals <bookings@gorentals.com>"
+//            RESEND_FROM_EMAIL="GoRentls <bookings@gorentls.com>"
 // Optional: RATE_RPS (default 2), RATE_BURST, APP_URL, RESEND_REPLY_TO,
 //            RESEND_API_URL (testing/proxy), DRAIN_* tunables
 //
@@ -50,10 +50,16 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 // Blueprint compatibility: WEBHOOK_SECRET is accepted as an alias name.
 const INTERNAL_SECRET = Deno.env.get("EMAIL_INTERNAL_SECRET") ?? Deno.env.get("WEBHOOK_SECRET") ?? "";
-const EMAIL_LOCALE = Deno.env.get("EMAIL_LOCALE") ?? "en-IN"; // GoRentals market default
-const FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") ?? "GoRentals <bookings@gorentals.com>";
-const REPLY_TO = Deno.env.get("RESEND_REPLY_TO") ?? "";
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://gorentals.com").replace(/\/+$/, "");
+const EMAIL_LOCALE = Deno.env.get("EMAIL_LOCALE") ?? "en-IN"; // GoRentls market default
+// Brand identity — every rendered string derives from these (migration 003 §A
+// stores the same values in email_config for SQL-side consumers).
+const BRAND_NAME = Deno.env.get("BRAND_NAME") ?? "GoRentls";
+const BRAND_DOMAIN = Deno.env.get("BRAND_DOMAIN") ?? "gorentls.com";
+const SUPPORT_EMAIL = Deno.env.get("SUPPORT_EMAIL") ?? `support@${BRAND_DOMAIN}`;
+const UNSUBSCRIBE_EMAIL = Deno.env.get("UNSUBSCRIBE_EMAIL") ?? `unsubscribe@${BRAND_DOMAIN}`;
+const FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") ?? `${BRAND_NAME} <bookings@${BRAND_DOMAIN}>`;
+const REPLY_TO = Deno.env.get("RESEND_REPLY_TO") ?? SUPPORT_EMAIL;
+const APP_URL = (Deno.env.get("APP_URL") ?? `https://www.${BRAND_DOMAIN}`).replace(/\/+$/, "");
 // Overridable for staging/proxy/testability; defaults to the public Resend API.
 const RESEND_API_URL = Deno.env.get("RESEND_API_URL") ?? "https://api.resend.com/emails";
 
@@ -68,6 +74,18 @@ const RATE_RPS = Number(Deno.env.get("RATE_RPS") ?? 2);       // Resend free tie
 const RATE_BURST = Number(Deno.env.get("RATE_BURST") ?? 3);
 
 const bucket = new TokenBucket({ rps: RATE_RPS, burst: RATE_BURST });
+
+/** Single source of truth for RenderContext (drain path + TEST_SEND). */
+const buildCtx = (recipient: string, unsubUrl: string | null): RenderContext => ({
+  recipient,
+  appUrl: APP_URL,
+  locale: EMAIL_LOCALE,
+  unsubUrl,
+  brandName: BRAND_NAME,
+  brandDomain: BRAND_DOMAIN,
+  supportEmail: SUPPORT_EMAIL,
+  unsubscribeEmail: UNSUBSCRIBE_EMAIL,
+});
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error(JSON.stringify({ ts: new Date().toISOString(), level: "error", svc: "notify-lifecycle", event: "config_missing", detail: "SUPABASE_URL/SERVICE_ROLE_KEY absent" }));
@@ -234,7 +252,7 @@ async function processOutboxRow(row: OutboxRow, workerId: string): Promise<RowOu
     }
   }
 
-  const ctx: RenderContext = { recipient: row.recipient, appUrl: APP_URL, locale: EMAIL_LOCALE, unsubUrl };
+  const ctx: RenderContext = buildCtx(row.recipient, unsubUrl);
   let rendered;
   try {
     rendered = def.render(validation.data, ctx);
@@ -491,7 +509,7 @@ async function actionTestSend(body: Record<string, unknown>): Promise<Response> 
     const tok = await rpc<string>("email_unsub_token", { p_email: to, p_topic: "marketing" });
     if (tok.data) unsubUrl = `${APP_URL}/api/unsubscribe?t=${encodeURIComponent(tok.data)}`;
   }
-  const rendered = def.render(v.data, { recipient: to, appUrl: APP_URL, locale: EMAIL_LOCALE, unsubUrl });
+  const rendered = def.render(v.data, buildCtx(to, unsubUrl));
 
   await bucket.take().catch(() => undefined);
   const outcome = await sendViaResend(RESEND_API_URL, RESEND_API_KEY, {

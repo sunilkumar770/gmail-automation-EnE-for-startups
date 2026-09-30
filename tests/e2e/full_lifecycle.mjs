@@ -55,7 +55,7 @@ async function sendWebhook(type, data, msgId) {
   const id = msgId ?? "itest-e2e-" + crypto.randomUUID();
   const ts = new Date();
   const sig = wh.sign(id, ts, payload);
-  const r = await webhookPOST(new NextRequest("https://gorentals.com/api/resend-webhook", {
+  const r = await webhookPOST(new NextRequest("https://gorentls.com/api/resend-webhook", {
     method: "POST",
     headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": sig },
     body: payload,
@@ -259,7 +259,7 @@ const BK3 = "eeeeeeee-9999-0000-0000-0000000000c3";
   const token = decodeURIComponent(m[1]);
 
   // mail client one-click: POST to the URL with the RFC 8058 body
-  const r = await unsubPOST(new NextRequest("https://gorentals.com/api/unsubscribe?t=" + encodeURIComponent(token), {
+  const r = await unsubPOST(new NextRequest("https://gorentls.com/api/unsubscribe?t=" + encodeURIComponent(token), {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click",
   }));
   check("S6 one-click POST → 200", r.status === 200, String(r.status));

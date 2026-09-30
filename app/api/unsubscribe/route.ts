@@ -1,5 +1,5 @@
 // ============================================================================
-// GoRentals — Secure unsubscribe endpoint (Next.js App Router)
+// GoRentls — Secure unsubscribe endpoint (Next.js App Router)
 // Path: app/api/unsubscribe/route.ts
 // ============================================================================
 // Master spec §13/§14: replaces the v1 `?email=<raw PII>` URL with an opaque,
@@ -25,6 +25,7 @@
 //     "suppression.removed" events can NEVER clear it (see §11 model).
 //
 // ENV: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (server-side only)
+//      BRAND_NAME, BRAND_DOMAIN, SUPPORT_EMAIL (brand identity, migration 003 §A)
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -33,13 +34,21 @@ import { callRpc, supabaseEnv } from "../../../lib/supabase-rpc";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Brand identity (mirror of the edge-fn env contract; migration 003 §A)
+const BRAND_NAME = process.env.BRAND_NAME ?? "GoRentls";
+const BRAND_DOMAIN = process.env.BRAND_DOMAIN ?? "gorentls.com";
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL ?? `support@${BRAND_DOMAIN}`;
+const brandLogo = /^Go[A-Z]/.test(BRAND_NAME)
+  ? `Go<span style="color:#2dd4bf;">${BRAND_NAME.slice(2)}</span>`
+  : BRAND_NAME;
+
 const PAGE = (title: string, bodyHtml: string) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>${title} — GoRentals</title></head>
+<meta name="robots" content="noindex,nofollow"><title>${title} — ${BRAND_NAME}</title></head>
 <body style="margin:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" style="padding:48px 16px;"><tr><td align="center">
 <table role="presentation" width="480" style="max-width:480px;width:100%;background:#fff;border-radius:12px;overflow:hidden;">
-<tr><td style="background:#0f172a;padding:16px 28px;"><span style="color:#fff;font-size:18px;font-weight:bold;">Go<span style="color:#2dd4bf;">Rentals</span></span></td></tr>
+<tr><td style="background:#0f172a;padding:16px 28px;"><span style="color:#fff;font-size:18px;font-weight:bold;">${brandLogo}</span></td></tr>
 <tr><td style="padding:28px;color:#334155;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
 </table></td></tr></table></body></html>`;
 
@@ -48,8 +57,8 @@ function invalidPage(): NextResponse {
   const html = PAGE(
     "Link invalid",
     `<h1 style="font-size:18px;color:#0f172a;margin:0 0 12px;">This unsubscribe link is invalid or has expired</h1>
-     <p>Please use the unsubscribe link from the most recent GoRentals email, or contact
-     <a href="mailto:support@gorentals.com" style="color:#0d9488;">support@gorentals.com</a> and we'll take care of it.</p>`,
+     <p>Please use the unsubscribe link from the most recent ${BRAND_NAME} email, or contact
+     <a href="mailto:${SUPPORT_EMAIL}" style="color:#0d9488;">${SUPPORT_EMAIL}</a> and we'll take care of it.</p>`,
   );
   return new NextResponse(html, { status: 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
@@ -90,7 +99,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const html = PAGE(
     "Confirm unsubscribe",
-    `<h1 style="font-size:18px;color:#0f172a;margin:0 0 12px;">Unsubscribe from GoRentals marketing emails?</h1>
+    `<h1 style="font-size:18px;color:#0f172a;margin:0 0 12px;">Unsubscribe from ${BRAND_NAME} marketing emails?</h1>
      <p>You'll stop receiving review requests, offers and newsletters. Booking confirmations,
      reminders and refund notices will still reach you — they're part of your rental.</p>
      <form method="POST" action="/api/unsubscribe" style="margin-top:20px;">
@@ -124,7 +133,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
      <p>Marketing emails will stop within 24 hours. Transactional messages about active
      bookings (confirmations, reminders, refunds) will still be delivered.</p>
      <p style="color:#94a3b8;font-size:13px;">Changed your mind? Email
-     <a href="mailto:support@gorentals.com" style="color:#0d9488;">support@gorentals.com</a> and we'll re-subscribe you.</p>`,
+     <a href="mailto:${SUPPORT_EMAIL}" style="color:#0d9488;">${SUPPORT_EMAIL}</a> and we'll re-subscribe you.</p>`,
   );
   return new NextResponse(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }

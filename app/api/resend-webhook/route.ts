@@ -1,5 +1,5 @@
 // ============================================================================
-// GoRentals — Resend webhook receiver v2 (Next.js App Router)
+// GoRentls — Resend webhook receiver v2 (Next.js App Router)
 // Path: app/api/resend-webhook/route.ts
 // ============================================================================
 // v2 architecture (AUDIT P0-6 fix): PERSIST-FIRST durable inbox.

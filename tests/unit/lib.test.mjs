@@ -6,6 +6,19 @@ import {
   states, retry, ratelimit, log, schemas, templates,
 } from "../.build/lib.mjs";
 
+// Full RenderContext as built by the worker (index.ts buildCtx) — brand fields
+// are REQUIRED in production; tests must exercise the real shape.
+const CTX = {
+  recipient: "r@example.com",
+  appUrl: "https://www.gorentls.com",
+  locale: "en-IN",
+  unsubUrl: null,
+  brandName: "GoRentls",
+  brandDomain: "gorentls.com",
+  supportEmail: "support@gorentls.com",
+  unsubscribeEmail: "unsubscribe@gorentls.com",
+};
+
 // ---------------------------------------------------------------------------
 // §19 CURRENCY CORRECTNESS
 // ---------------------------------------------------------------------------
@@ -220,19 +233,42 @@ test("schemas: win_back requires campaign period", () => {
 // ---------------------------------------------------------------------------
 // §16 TEMPLATE VERSIONING + RENDERING
 // ---------------------------------------------------------------------------
-test("templates: every registered template renders at v1 with html+text", () => {
-  const ctx = { recipient: "r@example.com", appUrl: "https://gorentals.com", unsubUrl: null };
-  const base = {
-    booking_id: "cccccccc-0000-0000-0000-000000000001",
-    listing_title: "Beachfront Camper", renter_name: "Ana", owner_name: "Bo",
-    starts_at: "2026-09-20T10:00:00Z", ends_at: "2026-09-23T10:00:00Z",
-    amount: 250, currency: "USD", timezone: "UTC",
-  };
+// Schema-valid sample payload for EVERY registered template — shared by the
+// render-loop and brand-purity tests (keeps schemas ↔ renderers coupled).
+const SAMPLE_BASE = {
+  booking_id: "cccccccc-0000-0000-0000-000000000001",
+  listing_title: "Canon EOS R5 Kit", renter_name: "Asha", owner_name: "Bo",
+  city: "Hyderabad",
+  starts_at: "2026-10-01T10:00:00+05:30", ends_at: "2026-10-04T10:00:00+05:30",
+  amount: 7500, currency: "INR", timezone: "Asia/Kolkata",
+};
+function samplePayloadFor(key) {
+  switch (key) {
+    case "welcome": return { user_id: "cccccccc-0000-0000-0000-000000000009", name: "Asha" };
+    case "refund_issued":
+    case "refund_initiated":
+      return { ...SAMPLE_BASE, refund_id: "dddddddd-0000-0000-0000-000000000001" };
+    case "refund_failed":
+      return { ...SAMPLE_BASE, refund_id: "dddddddd-0000-0000-0000-000000000002", reason: "bank account closed" };
+    case "win_back": return { campaign: "2026-09", renter_name: "Asha" };
+    case "otp": return { dedupe_key: "chal-1", otp_code: "482913", expiry_minutes: 10 };
+    case "kyc_submitted":
+    case "kyc_approved": return { dedupe_key: "kyc-1", name: "Asha", document_type: "Aadhaar card" };
+    case "kyc_rejected": return { dedupe_key: "kyc-1", reason: "Photo was blurred", name: "Asha" };
+    case "kyc_doc_expiring":
+      return { dedupe_key: "doc-1", campaign: "2026-09", document_type: "Driving licence", name: "Asha" };
+    case "payment_receipt": return { ...SAMPLE_BASE, dedupe_key: "pi_1", invoice_id: "INV-91823" };
+    case "payment_failed": return { ...SAMPLE_BASE, dedupe_key: "pi_2", reason: "insufficient funds" };
+    default: return SAMPLE_BASE;   // booking_* / access_instructions / review_request / deposit_released
+  }
+}
+
+test("templates: every registered template renders at v1 with html+text (schema-coupled)", () => {
   for (const key of Object.keys(templates.TEMPLATES)) {
-    const payload = key === "refund_issued"
-      ? { ...base, refund_id: "dddddddd-0000-0000-0000-000000000001" }
-      : key === "win_back" ? { campaign: "2026-09", renter_name: "Ana" } : base;
-    const out = templates.getTemplate(key, 1).render(payload, ctx);
+    const payload = samplePayloadFor(key);
+    const v = schemas.validatePayload(key, payload);
+    assert.ok(v.ok, `${key}: sample payload must satisfy its own schema — ${JSON.stringify(v.ok ? [] : v.errors)}`);
+    const out = templates.getTemplate(key, 1).render(v.data, { ...CTX });
     assert.ok(out.subject && out.subject.length > 3, `${key} subject`);
     assert.ok(out.html.includes("<!doctype html>"), `${key} html`);
     assert.ok(out.text && out.text.length > 20, `${key} text part (plain-text fallback)`);
@@ -250,7 +286,7 @@ test("templates: XSS in payload is escaped in html and can't break attributes", 
     renter_name: '"><b>', starts_at: "2026-09-20T10:00:00Z", amount: 1, currency: "USD", timezone: "UTC",
   };
   const out = templates.getTemplate("booking_confirmation", 1)
-    .render(evil, { recipient: "r@example.com", appUrl: "https://gorentals.com" });
+    .render(evil, { ...CTX });
   assert.ok(!out.html.includes("<script>"), "raw script tag leaked into HTML");
   assert.ok(out.html.includes("&lt;script&gt;"), "should be escaped in HTML contexts");
   // Subject is a PLAIN-TEXT header: entity-escaping it would corrupt normal
@@ -271,15 +307,15 @@ test("templates: CRLF injection into subjects is neutralized", () => {
     listing_title: "Van\r\nBcc: victim@evil.com", amount: 1, currency: "USD", timezone: "UTC",
   };
   const out = templates.getTemplate("booking_confirmation", 1)
-    .render(p, { recipient: "r@example.com", appUrl: "https://gorentals.com" });
+    .render(p, { ...CTX });
   assert.ok(!out.subject.includes("\r") && !out.subject.includes("\n"), "header injection!");
 });
 test("templates: marketing unsubscribe headers ONLY when a signed URL exists", () => {
   const p = { campaign: "2026-09", renter_name: "Ana" };
-  const noTok = templates.getTemplate("win_back", 1).render(p, { recipient: "r@example.com", appUrl: "https://x" });
+  const noTok = templates.getTemplate("win_back", 1).render(p, { ...CTX, appUrl: "https://x" });
   assert.equal(noTok.headers, undefined, "must not advertise an endpoint without a token");
   const withTok = templates.getTemplate("win_back", 1).render(p, {
-    recipient: "r@example.com", appUrl: "https://x", unsubUrl: "https://x/api/unsubscribe?t=v1.abc.def",
+    ...CTX, appUrl: "https://x", unsubUrl: "https://x/api/unsubscribe?t=v1.abc.def",
   });
   assert.match(withTok.headers["List-Unsubscribe"], /<https:\/\/x\/api\/unsubscribe\?t=/);
   assert.equal(withTok.headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
@@ -287,7 +323,7 @@ test("templates: marketing unsubscribe headers ONLY when a signed URL exists", (
   // transactional templates never carry unsubscribe headers
   const tx = templates.getTemplate("booking_confirmation", 1).render(
     { booking_id: "cccccccc-0000-0000-0000-000000000001", timezone: "UTC" },
-    { recipient: "r@example.com", appUrl: "https://x", unsubUrl: "https://x/api/unsubscribe?t=v1.a.b" });
+    { ...CTX, appUrl: "https://x", unsubUrl: "https://x/api/unsubscribe?t=v1.a.b" });
   assert.equal(tx.headers, undefined);
 });
 test("templates: rendered money+dates honor per-payload currency/timezone", () => {
@@ -296,7 +332,7 @@ test("templates: rendered money+dates honor per-payload currency/timezone", () =
     starts_at: "2026-07-04T18:30:00Z", amount: 1200, currency: "INR", timezone: "Asia/Kolkata",
   };
   const out = templates.getTemplate("booking_confirmation", 1)
-    .render(p, { recipient: "r@example.com", appUrl: "https://x" });
+    .render(p, { ...CTX, appUrl: "https://x" });
   assert.match(out.html + out.text, /₹|INR/);
   assert.match(out.html, /5 Jul|Jul 5/, "IST next-day render");
 });
@@ -307,27 +343,27 @@ test("templates: rendered money+dates honor per-payload currency/timezone", () =
 test("templates: welcome renders with name + CTA (transactional, no unsubscribe)", () => {
   const out = templates.getTemplate("welcome", 1).render(
     { user_id: "cccccccc-0000-0000-0000-000000000001", name: "Asha" },
-    { recipient: "asha@example.com", appUrl: "https://gorentals.test" });
-  assert.match(out.subject, /Welcome to GoRentals, Asha/);
+    { ...CTX, recipient: "asha@example.com" });
+  assert.match(out.subject, /Welcome to GoRentls, Asha/);
   assert.match(out.html, /Start browsing/);
-  assert.match(out.text, /Welcome to GoRentals/);
+  assert.match(out.text, /Welcome to GoRentls/);
   assert.equal(out.headers, undefined, "welcome is transactional — no List-Unsubscribe");
   const anon = templates.getTemplate("welcome", 1).render(
     { user_id: "cccccccc-0000-0000-0000-000000000002" },
-    { recipient: "x@example.com", appUrl: "https://gorentals.test" });
-  assert.match(anon.subject, /Welcome to GoRentals, there/);
+    { ...CTX, recipient: "x@example.com" });
+  assert.match(anon.subject, /Welcome to GoRentls, there/);
 });
 
 test("templates: city appears in booking confirmation details when present", () => {
   const out = templates.getTemplate("booking_confirmation", 1).render(
     { booking_id: "cccccccc-0000-0000-0000-000000000001", listing_title: "SeaView Caravan",
       city: "Goa", starts_at: "2026-10-01T10:00:00Z", amount: 4800, currency: "INR", timezone: "Asia/Kolkata" },
-    { recipient: "r@example.com", appUrl: "https://gorentals.test", locale: "en-IN" });
+    { ...CTX });
   assert.match(out.html, /Goa/);
   assert.match(out.html + out.text, /₹4,800/, "en-IN INR grouping");
   const noCity = templates.getTemplate("booking_confirmation", 1).render(
     { booking_id: "cccccccc-0000-0000-0000-000000000001", starts_at: "2026-10-01T10:00:00Z" },
-    { recipient: "r@example.com", appUrl: "https://gorentals.test" });
+    { ...CTX });
   assert.ok(!noCity.html.includes("Location"), "Location row must disappear without city");
 });
 
@@ -348,22 +384,179 @@ test("schemas: welcome requires user_id uuid; city accepted on booking payloads"
   }).ok);
 });
 
+// ---------------------------------------------------------------------------
+// 003 GoRentls catalog: OTP · KYC · refund lifecycle · payments · brand purity
+// ---------------------------------------------------------------------------
+test("schemas: otp requires a 4-10 alnum code + dedupe_key; fallback_sms allowed", () => {
+  assert.ok(!schemas.validatePayload("otp", { dedupe_key: "c1" }).ok, "code required");
+  assert.ok(!schemas.validatePayload("otp", { dedupe_key: "c1", otp_code: "12" }).ok, "too short");
+  assert.ok(!schemas.validatePayload("otp", { dedupe_key: "c1", otp_code: "123456789012" }).ok, "too long");
+  assert.ok(!schemas.validatePayload("otp", { dedupe_key: "c1", otp_code: "12<34" }).ok, "non-alnum rejected");
+  assert.ok(schemas.validatePayload("otp", {
+    dedupe_key: "c1", otp_code: "482913", expiry_minutes: 10, fallback_sms: true,
+  }).ok, "valid otp payload rejected");
+});
+
+test("schemas: kyc_rejected requires an actionable reason; payload URLs must be https", () => {
+  assert.ok(!schemas.validatePayload("kyc_rejected", { dedupe_key: "k1" }).ok, "reason required");
+  assert.ok(schemas.validatePayload("kyc_rejected", { dedupe_key: "k1", reason: "Photo blurred" }).ok);
+  assert.ok(!schemas.validatePayload("payment_receipt", {
+    dedupe_key: "p1", amount: 100, invoice_url: "javascript:alert(1)",
+  }).ok, "javascript: URL must be rejected");
+  assert.ok(!schemas.validatePayload("payment_receipt", {
+    dedupe_key: "p1", amount: 100, invoice_url: "http://insecure.example/x.pdf",
+  }).ok, "plain http rejected");
+  assert.ok(schemas.validatePayload("payment_receipt", {
+    dedupe_key: "p1", amount: 100, invoice_url: "https://www.gorentls.com/api/invoices/x/pdf?sig=abc",
+  }).ok);
+});
+
+test("templates: otp renders code prominently with expiry + anti-phishing warning", () => {
+  const out = templates.getTemplate("otp", 1).render(
+    { dedupe_key: "c1", otp_code: "482913", expiry_minutes: 5, action_type: "Sign in verification", name: "Asha" },
+    { ...CTX });
+  assert.match(out.subject, /^482913 is your GoRentls/);
+  assert.match(out.html, /482913/);
+  assert.match(out.text, /482913/);
+  assert.match(out.html + out.text, /5 minutes/);
+  assert.match(out.html, /NEVER ask/);
+  assert.equal(out.headers, undefined, "OTP is transactional — no unsubscribe headers");
+});
+
+test("templates: otp renderer strips non-alnum junk from the code (defense in depth)", () => {
+  const out = templates.getTemplate("otp", 1).render(
+    { dedupe_key: "c1", otp_code: '48"><script>2913' }, { ...CTX });
+  assert.ok(!out.html.includes("<script"), "code must be sanitized before render");
+  // junk collapses to alnum-only (schema is the first gate; renderer is the second)
+  assert.match(out.html, />48script29</);
+});
+
+test("templates: kyc_rejected escapes reviewer reason and surfaces support contact", () => {
+  const out = templates.getTemplate("kyc_rejected", 1).render(
+    { dedupe_key: "k1", reason: "<img src=x onerror=alert(1)> blurry photo", name: "Asha" }, { ...CTX });
+  assert.ok(!out.html.includes("<img src=x"), "raw img tag leaked");
+  assert.match(out.html, /blurry photo/);
+  assert.match(out.html, /Re-upload documents/);
+  assert.match(out.text, /support@gorentls\.com/);
+});
+
+test("templates: refund lifecycle renders initiated/failed states distinctly", () => {
+  const init = templates.getTemplate("refund_initiated", 1).render(
+    { refund_id: "dddddddd-0000-0000-0000-000000000001", amount: 2500, currency: "INR",
+      eta_days: "3-5", payment_method: "UPI •• 4412" }, { ...CTX });
+  assert.match(init.subject, /Refund initiated/);
+  assert.match(init.html, /₹2,500/);
+  assert.match(init.html, /3-5 business days/);
+  assert.match(init.html, /UPI •• 4412/);
+  const fail = templates.getTemplate("refund_failed", 1).render(
+    { refund_id: "dddddddd-0000-0000-0000-000000000002", amount: 2500, currency: "INR",
+      reason: "bank account closed" }, { ...CTX });
+  assert.match(fail.subject, /couldn't send your refund/);
+  assert.match(fail.html, /bank account closed/);
+  assert.match(fail.html, /mailto:support@gorentls\.com/);
+  assert.match(fail.html + fail.text, /safe with us/i);
+});
+
+test("templates: deposit_released itemizes deductions (or shows None)", () => {
+  const out = templates.getTemplate("deposit_released", 1).render(
+    { booking_id: "cccccccc-0000-0000-0000-000000000001", amount: 4000, currency: "INR",
+      deductions: "Late return fee ₹500" }, { ...CTX });
+  assert.match(out.html, /₹4,000/);
+  assert.match(out.html, /Late return fee/);
+  const none = templates.getTemplate("deposit_released", 1).render(
+    { booking_id: "cccccccc-0000-0000-0000-000000000001", amount: 4500, currency: "INR" }, { ...CTX });
+  assert.match(none.html, /None/);
+});
+
+test("templates: payment_receipt prefers signed invoice link, renderer-side guards non-https", () => {
+  const withUrl = templates.getTemplate("payment_receipt", 1).render(
+    { dedupe_key: "pi_1", amount: 7500, currency: "INR", invoice_id: "INV-91823",
+      invoice_url: "https://www.gorentls.com/api/invoices/91823/pdf?sig=x", payment_method: "UPI" }, { ...CTX });
+  assert.match(withUrl.html, /Download invoice \(PDF\)/);
+  assert.match(withUrl.html, /sig=x/);
+  assert.match(withUrl.html, /INV-91823/);
+  const evil = templates.getTemplate("payment_receipt", 1).render(
+    { dedupe_key: "pi_2", amount: 100, currency: "INR", invoice_url: "javascript:alert(1)" }, { ...CTX });
+  assert.ok(!evil.html.includes("javascript:"), "renderer-side URL guard failed");
+  const noUrl = templates.getTemplate("payment_receipt", 1).render(
+    { dedupe_key: "pi_3", amount: 100, currency: "INR",
+      booking_id: "cccccccc-0000-0000-0000-000000000001" }, { ...CTX });
+  assert.match(noUrl.html, /View booking/);
+});
+
+test("templates: payment_failed carries reason + retry CTA", () => {
+  const out = templates.getTemplate("payment_failed", 1).render(
+    { dedupe_key: "pi_4", amount: 3000, currency: "INR", reason: "insufficient funds",
+      retry_url: "https://www.gorentls.com/checkout/retry?id=4" }, { ...CTX });
+  assert.match(out.subject, /Payment failed/);
+  assert.match(out.html, /insufficient funds/);
+  assert.match(out.html, /Retry payment/);
+  assert.match(out.html, /checkout\/retry/);
+});
+
+test("templates: kyc_doc_expiring is transactional (no unsubscribe) and shows the expiry date", () => {
+  const out = templates.getTemplate("kyc_doc_expiring", 1).render(
+    { dedupe_key: "doc-1", campaign: "2026-09", document_type: "Driving licence",
+      expiry_date: "2026-10-12T18:30:00+05:30", timezone: "Asia/Kolkata", name: "Asha" }, { ...CTX });
+  assert.match(out.subject, /Driving licence expires soon/);
+  assert.match(out.html, /12 Oct,? 2026|Oct 12/);
+  assert.match(out.html, /6:30/, "expiry must render in the payload timezone (IST)");
+  assert.equal(out.headers, undefined);
+});
+
+test("brand purity: no rendered template references the legacy GoRentals brand/domain", () => {
+  for (const key of Object.keys(templates.TEMPLATES)) {
+    const out = templates.getTemplate(key, 1).render(samplePayloadFor(key), { ...CTX });
+    const all = out.subject + "\n" + out.html + "\n" + out.text + "\n" + JSON.stringify(out.headers ?? {});
+    assert.ok(!/gorentals/i.test(all), `${key} still references the legacy brand`);
+    assert.match(out.html, /gorentls\.com/, `${key} footer must link the real domain`);
+    assert.match(out.html, /GoRentls/, `${key} must carry the brand name`);
+  }
+});
+
+test("log: secret-named fields are value-redacted (otp codes never hit logs)", () => {
+  const lines = [];
+  const orig = console.log;
+  console.log = (l) => lines.push(String(l));
+  try {
+    log.logInfo({ event: "row_sent", otp_code: "482913", api_key: "re_secret123", status: "accepted" });
+  } finally {
+    console.log = orig;
+  }
+  const joined = lines.join("\n");
+  assert.ok(!joined.includes("482913"), "otp_code value leaked into logs");
+  assert.match(joined, /"otp_code":"\*\*\*"/);
+  assert.match(joined, /"status":"accepted"/, "normal fields must stay readable");
+});
+
 test("preview templates mirror send templates (drift guard)", async () => {
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const root = fileURLToPath(new URL("../../", import.meta.url));
   const send = readFileSync(root + "supabase/functions/notify-lifecycle/lib/templates.ts", "utf8");
-  const previews = ["emails/_layout.tsx", "emails/welcome.tsx", "emails/booking-pair.tsx"]
-    .map((f) => readFileSync(root + f, "utf8")).join("\n");
+  const previews = [
+    "emails/_layout.tsx", "emails/welcome.tsx", "emails/booking-pair.tsx",
+    "emails/otp.tsx", "emails/kyc.tsx", "emails/refunds.tsx", "emails/payments.tsx",
+  ].map((f) => readFileSync(root + f, "utf8")).join("\n");
   // key phrases that must exist on BOTH sides (case-insensitive)
   const shared = [
     "welcome, ", "start browsing", "you're all set", "booking request",
     "was cancelled", "refund is on the way", "starts soon", "how did it go",
-    "leave a review", "ready for the next trip", "browse rentals", "gorentals",
+    "leave a review", "ready for the next trip", "browse rentals", "gorentls",
+    // 003 catalog
+    "your verification code", "verification received", "you're verified",
+    "verification unsuccessful", "re-upload documents", "expires soon",
+    "refund is on its way", "couldn't complete your refund", "security deposit released",
+    "payment received", "download invoice", "payment failed", "retry payment",
+    "cameras, bikes, cars and event gear",
   ];
   for (const phrase of shared) {
     const rx = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     assert.ok(rx.test(send), `send templates missing "${phrase}"`);
     assert.ok(rx.test(previews), `preview templates missing "${phrase}" (mirror drift)`);
+  }
+  // inverse brand guard: the legacy brand must be gone from BOTH sides
+  for (const [name, src] of [["send", send], ["previews", previews]]) {
+    assert.ok(!/gorentals/i.test(src), `${name} side still contains the legacy GoRentals brand`);
   }
 });

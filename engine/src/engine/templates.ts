@@ -34,7 +34,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Welcome to {{companyName}}, {{userName}}!',
     preheader: 'Your account is ready. Get started exploring your dashboard today.',
     ctaText: 'Verify & Explore',
-    ctaUrlTemplate: 'https://gorentals.example/verify',
+    ctaUrlTemplate: 'https://www.gorentls.com/verify',
   },
   'AUTH_OTP': {
     key: 'AUTH_OTP',
@@ -73,7 +73,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Confirmed: Your rental for {{listingName}} (#{{bookingId}})',
     preheader: 'Your booking has been approved and locked in. Here are your trip details.',
     ctaText: 'View Rental Details',
-    ctaUrlTemplate: 'https://gorentals.example/bookings/{{bookingId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/bookings/{{bookingId}}',
   },
   'PAYMENT_SUCCESS': {
     key: 'PAYMENT_SUCCESS',
@@ -86,7 +86,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Receipt for your payment of {{currency}} {{amount}}',
     preheader: 'Your payment was processed successfully. Thank you for your business.',
     ctaText: 'Download Invoice',
-    ctaUrlTemplate: 'https://gorentals.example/invoices/{{invoiceId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/invoices/{{invoiceId}}',
   },
   'PAYMENT_FAILED': {
     key: 'PAYMENT_FAILED',
@@ -112,7 +112,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Reminder: Your rental of {{listingName}} starts tomorrow',
     preheader: 'Get ready for pickup! Review check-in instructions and required documents.',
     ctaText: 'Check-in Guide',
-    ctaUrlTemplate: 'https://gorentals.example/checkin',
+    ctaUrlTemplate: 'https://www.gorentls.com/checkin',
   },
   'REFUND_COMPLETED': {
     key: 'REFUND_COMPLETED',
@@ -125,7 +125,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Refund of {{currency}} {{amount}} processed (#{{refundId}})',
     preheader: 'Your refund has been initiated and should arrive in {{estimatedArrivalDays}} business days.',
     ctaText: 'View Refund Status',
-    ctaUrlTemplate: 'https://gorentals.example/refunds/{{refundId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/refunds/{{refundId}}',
   },
   'BOOKING_CANCELLED': {
     key: 'BOOKING_CANCELLED',
@@ -138,7 +138,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Booking #{{bookingId}} has been cancelled',
     preheader: 'Your reservation for {{listingName}} is cancelled. Review refund summary.',
     ctaText: 'Review Cancellation Details',
-    ctaUrlTemplate: 'https://gorentals.example/bookings/{{bookingId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/bookings/{{bookingId}}',
   },
   'REVIEW_REQUESTED': {
     key: 'REVIEW_REQUESTED',
@@ -166,7 +166,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Action Needed: New booking request from {{renterName}}',
     preheader: 'Respond within {{actionDeadline}} to accept or decline this reservation.',
     ctaText: 'Respond to Booking',
-    ctaUrlTemplate: 'https://gorentals.example/owner/requests',
+    ctaUrlTemplate: 'https://www.gorentls.com/owner/requests',
   },
   'OWNER_PAYOUT_COMPLETED': {
     key: 'OWNER_PAYOUT_COMPLETED',
@@ -179,7 +179,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: 'Payout dispatched: {{currency}} {{amount}} sent to your bank',
     preheader: 'Your earnings for booking #{{bookingId}} have been deposited.',
     ctaText: 'View Earnings Breakdown',
-    ctaUrlTemplate: 'https://gorentals.example/owner/payouts/{{payoutId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/owner/payouts/{{payoutId}}',
   },
 
   // Platform & Operational Alerts
@@ -194,7 +194,7 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDefinition> = {
     defaultSubject: '[{{severity}}] {{serviceName}}: {{summary}}',
     preheader: 'Automated platform alert. Immediate attention required if High/Critical.',
     ctaText: 'Open Incident Dashboard',
-    ctaUrlTemplate: 'https://gorentals.example/ops/incidents/{{incidentId}}',
+    ctaUrlTemplate: 'https://www.gorentls.com/ops/incidents/{{incidentId}}',
   },
 };
 
@@ -263,10 +263,10 @@ export function renderEmail(
     throw new Error(validation.error);
   }
 
-  const tenant = options.tenantName || 'GoRentals';
+  const tenant = options.tenantName || 'GoRentls';
   const brandColor = options.brandColor || '#0d9488'; // Emerald/Teal primary
-  const supportEmail = options.supportEmail || 'support@gorentals.example';
-  const unsubscribeUrl = options.unsubscribeUrl || 'https://gorentals.example/notifications/preferences';
+  const supportEmail = options.supportEmail || 'support@gorentls.com';
+  const unsubscribeUrl = options.unsubscribeUrl || 'https://www.gorentls.com/notifications/preferences';
 
   const mergedData = { companyName: tenant, ...data };
   const subject = sanitizeHeader(interpolate(def.defaultSubject, mergedData));

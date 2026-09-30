@@ -1,0 +1,66 @@
+# ============================================================================
+# CI — full verification pipeline on every push/PR
+# Mirrors `npm test` (tests/run_all.sh): build → typecheck (tsc + deno check) →
+# eslint → unit → db (v2+v3 suites, §25 schema-safety) → integration (real
+# Deno ↔ real PostgREST ↔ real PG ↔ mock Resend) → e2e → chaos → security.
+# Plus the engine dashboard typecheck/build.
+#
+# NOTE: ubuntu-24.04 (PostgreSQL 16) is REQUIRED — migration 001 uses
+# `alter view ... set (security_invoker = off)` (PG15+).
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PG_SU_MODE: sudo # harness/run_db_tests switch: sudo -u postgres instead of su
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Start PostgreSQL (preinstalled on runner image)
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -tAc "select version()"
+
+      - name: Install PostgREST 12 (integration harness)
+        run: |
+          curl -fsSL -o /tmp/postgrest.tar.xz \
+            https://github.com/PostgREST/postgrest/releases/download/v12.2.3/postgrest-v12.2.3-linux-static-x64.tar.xz
+          sudo tar -xJf /tmp/postgrest.tar.xz -C /usr/local/bin
+          postgrest --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Full pipeline (typecheck, lint, unit, db, integration, e2e, chaos, security)
+        run: npm test
+
+      - name: Engine dashboard (Live Ops console) typecheck + build
+        run: |
+          cd engine
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npx tsc --noEmit
+          npx vite build

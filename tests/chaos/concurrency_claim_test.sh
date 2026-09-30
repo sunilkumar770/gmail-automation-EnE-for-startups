@@ -15,7 +15,8 @@ HOLD="${HOLD:-1.5}"
 WORK=$(mktemp -d /tmp/claimtest.XXXXXX)
 chmod 755 "$WORK"
 
-run_sql_file() { su postgres -c "psql -d $DB -tA -q -v ON_ERROR_STOP=1 -f $1"; }
+if [ "${PG_SU_MODE:-su}" = "sudo" ]; then SU_PG=(sudo -u postgres bash -c); else SU_PG=(su postgres -c); fi
+run_sql_file() { "${SU_PG[@]}" "psql -d $DB -tA -q -v ON_ERROR_STOP=1 -f $1"; }
 
 cat > "$WORK/seed.sql" <<SQL
 delete from public.email_outbox where logical_event_id like 'CHAOS_CLAIM:%';

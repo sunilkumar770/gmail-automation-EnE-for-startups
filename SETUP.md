@@ -1,4 +1,4 @@
-# GoRentals Email System v2 — Setup & Verification Guide
+# GoRentls Email System v2+v3 — Setup & Verification Guide
 
 Deploy the hardened v2 pipeline end-to-end. Work top to bottom; every step is
 copy-pasteable. ≈45 minutes (mostly Resend DNS propagation).
@@ -19,7 +19,7 @@ copy-pasteable. ≈45 minutes (mostly Resend DNS propagation).
 | Deno ≥ 1.40 (only for local `npm test`) | `deno --version` |
 | Local Postgres (only for local `npm test`) | `psql --version` |
 | Resend account + API key (`re_…`) | dashboard |
-| DNS control for gorentals.com | — |
+| DNS control for gorentls.com | — |
 | `PROJECT_REF` | Supabase Dashboard → Settings → General |
 
 Repo layout expected by your Next.js app:
@@ -62,14 +62,17 @@ Dashboard → Database → Extensions (or SQL editor): **pg_cron**, **pg_net**,
 ## Step 3 — Push migrations
 
 ```bash
-supabase db push     # applies 000 → 001 → 002 (all idempotent)
+supabase db push     # applies 000 → 001 → 002 → 003 (all idempotent)
 ```
 
 Confirm in output: reconciliation NOTICEs (v3 mapping reports owner source +
 city), `trigger trg_bookings_email_v2 attached (fail-loud)`,
 `trigger trg_profiles_email_v2 attached (welcome emails)`,
 `cron v3: … reminder 09:00 IST, review 09:05 IST, winback Mon 09:30 IST`,
-`002 COMPLETE`.
+`002 COMPLETE`, then from 003: `refund mapping v3: reason=… method=…`,
+either `KYC producer attached: public.<table>` **or** `KYC: no verification
+table detected` (create the table, then re-run 003 — it's idempotent),
+`cron renamed to gorentls-email-*`, `003 COMPLETE`.
 
 Business defaults applied by 002: `default_currency='INR'`,
 `business_timezone='Asia/Kolkata'`, `email_locale='en-IN'` — adjust in
@@ -106,12 +109,20 @@ Edge function secrets:
 supabase secrets set \
   RESEND_API_KEY=re_YourKey \
   EMAIL_INTERNAL_SECRET='<SAME hex as Vault>' \
-  RESEND_FROM_EMAIL='GoRentals <bookings@gorentals.com>' \
-  RESEND_REPLY_TO='support@gorentals.com' \
-  APP_URL='https://gorentals.com'
+  RESEND_FROM_EMAIL='GoRentls <bookings@gorentls.com>' \
+  RESEND_REPLY_TO='support@gorentls.com' \
+  APP_URL='https://www.gorentls.com' \
+  BRAND_NAME='GoRentls' \
+  BRAND_DOMAIN='gorentls.com' \
+  SUPPORT_EMAIL='support@gorentls.com' \
+  UNSUBSCRIBE_EMAIL='unsubscribe@gorentls.com'
 # optional tuning: RATE_RPS=2 RATE_BURST=3 DRAIN_BATCH_SIZE=25 RESEND_TIMEOUT_MS=20000
 supabase secrets list
 ```
+
+> Brand env (003): every rendered brand string — logo, footer, subjects,
+> support/unsubscribe addresses — derives from these. The defaults ARE the
+> GoRentls values; set them explicitly anyway so staging/prod can't drift.
 
 ## Step 5 — Deploy worker + point cron at it
 
@@ -134,14 +145,32 @@ re-scheduling with the same command (see RUNBOOK §3).
 
 ## Step 6 — Resend: domain + webhook
 
-1. Domains → Add `send.gorentals.com` (or gorentals.com) → create the shown
+1. Domains → Add `send.gorentls.com` (or gorentls.com) → create the shown
    **SPF (TXT)**, **DKIM (TXT)**, **Return-Path (MX)** records → wait for Verified.
-2. DMARC on gorentals.com — week 1 monitoring, then tighten:
-   `_dmarc TXT "v=DMARC1; p=none; rua=mailto:dmarc@gorentals.com; fo=1"`
-3. Webhooks → Create → `https://gorentals.com/api/resend-webhook`, subscribe:
+2. DMARC on gorentls.com — week 1 monitoring, then tighten:
+   `_dmarc TXT "v=DMARC1; p=none; rua=mailto:dmarc@gorentls.com; fo=1"`
+3. Webhooks → Create → `https://www.gorentls.com/api/resend-webhook`, subscribe:
    `email.sent`, `email.delivered`, `email.bounced`, `email.complained`,
    `email.delivery_delayed`, `email.failed`, `email.suppressed`,
    `suppression.added`, `suppression.removed` → copy the `whsec_…` signing secret.
+
+## Step 6b — Supabase Auth emails → Resend (custom SMTP)
+
+Without this, signup confirmations, magic links, OTPs and password resets go
+through Supabase's **built-in SMTP (~2–4 mails/hour, unbranded)** — a hard
+ceiling for a live marketplace. Auth dashboard → SMTP settings → enable
+custom SMTP:
+
+```
+Host: smtp.resend.com   Port: 465 (SSL)
+Username: resend        Password: <RESEND_API_KEY>
+Sender: GoRentls <noreply@gorentls.com>
+```
+
+Then align the Auth email templates (confirm signup / magic link / reset
+password) with the GoRentls brand. If you issue your OWN login OTPs via this
+system (`otp` template, priority-1 fastlane), consider disabling Auth's
+email OTP for those flows to avoid double codes.
 
 ## Step 7 — Next.js (Vercel)
 
@@ -205,7 +234,7 @@ Requires local Postgres + Deno; the harness bootstraps its own database
 ```bash
 export PROJECT_REF=… EMAIL_INTERNAL_SECRET='<vault value>' TEST_TO=you@yourdomain.com
 export DB_URL='postgresql://postgres.YOUR_PROJECT_REF:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres'
-export APP_BASE_URL=https://gorentals.com APP_WEBHOOK_URL=$APP_BASE_URL/api/resend-webhook
+export APP_BASE_URL=https://www.gorentls.com APP_WEBHOOK_URL=$APP_BASE_URL/api/resend-webhook
 export RESEND_WEBHOOK_SECRET=whsec_…
 bash scripts/curl_tests.sh
 ```
@@ -218,27 +247,33 @@ health + zero-secret-leak check → dead-letter review with replay example.
 ## Step 11 — Go-live checklist
 
 - [ ] Reconciliation report attached to deploy ticket; no `!! NOT FOUND`/`SCHEMA MAPPING` errors
-- [ ] `cron.job`: 7 `gorentals-email-*` jobs (drain/stale/events/cleanup/reminder/review/winback), zero secret literals (curl_tests §12 asserts)
-- [ ] Vault: `EMAIL_INTERNAL_SECRET` + `UNSUB_TOKEN_SECRET`; edge secrets match
+- [ ] `cron.job`: 7 `gorentls-email-*` jobs (drain/stale/events/cleanup/reminder/review/winback), zero `gorentals-email-*` left, zero secret literals (curl_tests §12 asserts)
+- [ ] Vault: `EMAIL_INTERNAL_SECRET` + `UNSUB_TOKEN_SECRET`; edge secrets match; brand env set (BRAND_NAME/BRAND_DOMAIN/APP_URL/SUPPORT_EMAIL)
 - [ ] `edge_function_url` set; HEALTHCHECK 200 (`"version":"2"`)
 - [ ] Wrong secret → 401 (curl_tests §2/§3)
-- [ ] Resend domain Verified (SPF+DKIM+Return-Path); DMARC live (`p=none` week 1)
-- [ ] Test email in inbox (not spam); From/Return-Path domain-aligned
+- [ ] Resend domain Verified (SPF+DKIM+Return-Path) for **gorentls.com**; DMARC live (`p=none` week 1)
+- [ ] Supabase Auth custom SMTP → Resend (Step 6b); test signup email arrives branded, not from supabase.email
+- [ ] Test email in inbox (not spam); From/Return-Path domain-aligned; footer links to gorentls.com (NO gorentals.com anywhere)
+- [ ] **OTP fastlane**: ENQUEUE an `otp` row → delivered in seconds (fastlane kick), not ≤5 min; second OTP cancels the first (`CANCELLED` + `otp-supersede` audit)
+- [ ] **KYC producer**: 003 NOTICE says `KYC producer attached: public.<your table>` (or app-side ENQUEUE wired for review actions); rejection email carries the reviewer's reason
 - [ ] Webhook test event → `email_provider_events` row + state advance; bounce sim → `email_suppressions` (`source=resend`)
 - [ ] Unsubscribe: GET confirm page, POST one-click → `source=user` row; forged token → identical 400
-- [ ] Caps reviewed: `daily_soft_cap=85`/`daily_hard_cap=100` (free plan). Paid plan → raise both.
-- [ ] `npm test` green locally; RUNBOOK.md assigned an owner
+- [ ] Caps reviewed: `daily_soft_cap=85`/`daily_hard_cap=100` (free plan). Paid plan → raise both (003 §I) — at the hard cap even OTPs park +15 min
+- [ ] `npm test` green locally **and in CI** (`.github/workflows/ci.yml`); RUNBOOK.md assigned an owner
 
 ## Rollback / kill-switches
 
 ```sql
 -- pause everything (queues keep accumulating durably):
-update cron.job set active=false where jobname like 'gorentals-email-%';
+update cron.job set active=false where jobname like 'gorentls-email-%';
+-- disable ONLY the priority-1 fastlane kick (cron-only draining, ≤5 min):
+update public.email_config set value='false', updated_at=now() where key='fastlane_enabled';
 -- stop new intents only (worker keeps draining what exists):
 update public.email_config set value='off' where key='enqueue_source';   -- triggers AND webhook handler stand down
 -- full v2→quiescent (data preserved):
 drop trigger if exists trg_bookings_email_v2 on public.bookings;
 drop trigger if exists trg_refunds_email_v2 on public.refunds;
+drop trigger if exists trg_kyc_email_v1 on public.kyc_verifications;  -- (or your detected kyc_table)
 ```
 
 Resume by reversing. Outbox rows are durable throughout — nothing is lost by

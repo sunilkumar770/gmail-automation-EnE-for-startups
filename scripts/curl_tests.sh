@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# GoRentals email system v2 — post-deploy verification suite (curl + psql)
+# GoRentls email system v2+v3 — post-deploy verification suite (curl + psql)
 # ----------------------------------------------------------------------------
 # Usage:
 #   export PROJECT_REF=abcdefghijklm            # Supabase project ref
@@ -103,8 +103,8 @@ code=$(post_fn "$SECRET" '{"action":"PROCESS_EVENTS","limit":100}'); check "PROC
 
 hr; echo "12. pg_cron health (requires DB_URL): 7 jobs, recent runs succeeded"
 if [ -n "${DB_URL:-}" ]; then
-  psql "$DB_URL" -c "select jobname, schedule, active from cron.job where jobname like 'gorentals-email-%' order by jobname"
-  psql "$DB_URL" -c "select j.jobname, r.status, left(coalesce(r.return_message,''),60) as msg, r.start_time from cron.job_run_details r join cron.job j on j.jobid=r.jobid where j.jobname like 'gorentals-email-%' order by r.start_time desc limit 8"
+  psql "$DB_URL" -c "select jobname, schedule, active from cron.job where jobname like 'gorent%-email-%' order by jobname"
+  psql "$DB_URL" -c "select j.jobname, r.status, left(coalesce(r.return_message,''),60) as msg, r.start_time from cron.job_run_details r join cron.job j on j.jobid=r.jobid where j.jobname like 'gorent%-email-%' order by r.start_time desc limit 8"
   leak=$(psql "$DB_URL" -tA -c "select count(*) from cron.job where command like '%${SECRET}%'")
   if [ "$leak" = "0" ]; then PASS=$((PASS+1)); echo "PASS  no secret literals in cron.job (Vault-only)"
   else FAIL=$((FAIL+1)); echo "FAIL  SECRET FOUND IN cron.job — rotate immediately"; fi

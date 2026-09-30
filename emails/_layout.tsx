@@ -8,9 +8,10 @@ import {
 import type { ReactNode } from "react";
 
 export const brand = {
-  name: "GoRentals",
+  name: "GoRentls",
   color: "#0F766E",
-  url: "https://gorentals.com",
+  url: "https://www.gorentls.com",
+  supportEmail: "support@gorentls.com",
 };
 
 export function Layout(props: {
@@ -38,7 +39,7 @@ export function Layout(props: {
           )}
           <Hr style={{ marginTop: 32, borderColor: "#e4e4e7" }} />
           <Text style={{ fontSize: 12, color: "#a1a1aa" }}>
-            GoRentals · gorentals.com
+            GoRentls · gorentls.com
             {props.marketing && props.unsubHref && (
               <>
                 {" · "}

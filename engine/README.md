@@ -1,20 +1,36 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Gmail Automation Engine — Ops Dashboard
 
-# Run and deploy your AI Studio app
+Vite/React console for the GoRentls email system.
 
-This contains everything you need to run your app locally.
+> ⚠️ **Two modes — know which one you're in.**
+> * **Demo tabs** (Event Testbench, Transactional Outbox, Template Studio, Gmail API &
+>   Quotas, Observability, Integration SDK, Forensic Report) are an **in-memory
+>   simulation** for architecture demos and chaos experimentation. They send nothing.
+> * **⚡ Live Ops (Real API)** calls the **deployed `notify-lifecycle` edge function** —
+>   the same operator surface pg_cron and `RUNBOOK.md` use:
+>   `HEALTHCHECK · ENQUEUE · TRACE · REPLAY · DRAIN_QUEUE`
+>   (`src/engine/apiClient.ts`, template catalog in `src/engine/liveCatalog.ts`).
 
-View your app in AI Studio: https://ai.studio/apps/f30c0087-a943-487d-ad2c-d8ee5ac043dc
+## Run locally
 
-## Run Locally
+```bash
+npm install --legacy-peer-deps   # repo is bun-lock'd; npm needs the peer flag
+npm run dev                      # http://localhost:3000
+```
 
-**Prerequisites:**  Node.js
+## Connecting Live Ops to production
 
+1. Open the **⚡ Live Ops** tab.
+2. Edge function URL: `https://<project-ref>.supabase.co/functions/v1/notify-lifecycle`
+3. Secret: the `EMAIL_INTERNAL_SECRET` value (Vault ↔ edge env — see `SETUP.md` Step 4).
+4. **Save & Test** runs a real `HEALTHCHECK` (queue depth, caps, drain lease, inbox
+   backlog) and only persists the connection on success.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+The edge function sends permissive CORS headers, so the console works straight from
+the browser. **Treat the secret as operator-grade**: anyone holding it can enqueue,
+replay and drain. Host this dashboard behind your own auth (or run it locally),
+never on a public URL. Settings persist in `localStorage` of that browser only.
+
+`event → production template` mapping for the demo presets lives in
+`liveCatalog.ts` (`EVENT_TO_TEMPLATE`); presets without a mapping
+(`OWNER_PAYOUT_COMPLETED`, `SYSTEM_ALERT`) are roadmap items — see the review doc.

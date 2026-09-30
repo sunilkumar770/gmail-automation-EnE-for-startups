@@ -38,3 +38,21 @@ REST API directly (Idempotency-Key, tags, timeout + ambiguity handling).
 | `booking-pair.tsx` → BookingReminderEmail | `booking_reminder` |
 | `booking-pair.tsx` → ReviewRequestEmail | `review_request` |
 | `booking-pair.tsx` → WinBackEmail | `win_back` |
+| `otp.tsx` → OtpEmail | `otp` (migration 003 — priority 1, fast-lane) |
+| `kyc.tsx` → KycSubmittedEmail | `kyc_submitted` |
+| `kyc.tsx` → KycApprovedEmail | `kyc_approved` |
+| `kyc.tsx` → KycRejectedEmail | `kyc_rejected` |
+| `kyc.tsx` → KycDocExpiringEmail | `kyc_doc_expiring` |
+| `refunds.tsx` → RefundInitiatedEmail | `refund_initiated` |
+| `refunds.tsx` → RefundFailedEmail | `refund_failed` |
+| `refunds.tsx` → DepositReleasedEmail | `deposit_released` |
+| `payments.tsx` → PaymentReceiptEmail | `payment_receipt` (signed invoice LINK, not attachment) |
+| `payments.tsx` → PaymentFailedEmail | `payment_failed` |
+
+## Branding (migration 003)
+
+Brand identity is config-driven on BOTH sides: `brand` in `_layout.tsx`
+(previews) and `RenderContext` built from edge-fn env (`BRAND_NAME`,
+`BRAND_DOMAIN`, `APP_URL`, `SUPPORT_EMAIL`, `UNSUBSCRIBE_EMAIL`) for sends.
+The drift-guard unit test additionally fails the build if the legacy
+`GoRentals`/`gorentals.com` brand reappears on either side.

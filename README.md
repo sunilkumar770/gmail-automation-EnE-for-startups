@@ -25,6 +25,10 @@ EMAIL OUTBOX  ── email_outbox ───────────────�
       · payload validated against registry schema at enqueue (§17/18)
       · suppression + rate-cap applied at enqueue AND at send
       ↓  pg_cron */5 → pg_net (secret from Vault at runtime) → edge fn
+      ↓  ⚡ FASTLANE (003): priority-1 inserts (OTP/KYC/refunds/critical) fire an
+      ↓     immediate async DRAIN_QUEUE kick on insert — seconds, not ≤5 min;
+      ↓     best-effort (cron stays the backstop); concurrent kicks are safe
+      ↓     (drain lease + SKIP LOCKED). Newer OTP CANCELS older queued OTPs.
 WORKER (notify-lifecycle, DRAIN_QUEUE)
       · drain lease (single active drainer) + FOR UPDATE SKIP LOCKED claim
       · claim is FREE (no attempt consumed); begin_send opens the ledger row
@@ -67,6 +71,22 @@ UNSUBSCRIBE (app/api/unsubscribe, §13)
       · RFC 8058 one-click POST; GET = confirmation page (no side effects)
 ```
 
+## Template catalog (21 registered, schema-gated, version-pinned)
+
+| Group | Keys | Producer |
+|---|---|---|
+| Auth | `otp` ⚡ | app-side ENQUEUE (or Supabase Auth custom SMTP → Resend for built-in flows) |
+| KYC | `kyc_submitted` · `kyc_approved` · `kyc_rejected` (reason required) · `kyc_doc_expiring` | trigger on the auto-detected KYC table (003 §F) or app-side ENQUEUE for review actions |
+| Booking | `booking_confirmation` · `booking_host_confirmation` · `booking_request_owner` · `booking_cancelled_renter` · `booking_cancelled_owner` · `booking_reminder` · `access_instructions` | triggers on `bookings.status` + IST-morning cron scan |
+| Refunds & deposits | `refund_initiated` · `refund_failed` · `refund_issued` · `deposit_released` | trigger on `refunds.status` (initiated/failed/issued); deposit app-side |
+| Payments | `payment_receipt` (signed invoice LINK) · `payment_failed` | app-side ENQUEUE from the payment webhook handler |
+| Growth | `welcome` · `review_request` · `win_back` | profiles trigger + cron scans (marketing rows carry signed one-click unsubscribe) |
+
+⚡ = priority 1 → **fastlane**: an async `DRAIN_QUEUE` kick fires on insert
+(003 §D), so OTPs/critical mail send in seconds instead of waiting for the
+*/5 cron. A newer OTP for the same recipient **cancels** older queued OTPs
+(audited `QUEUED→CANCELLED`); OTP codes are field-redacted from logs.
+
 ## ID taxonomy (§3 — six identities, never conflated)
 
 | ID | Lives in | Purpose |
@@ -104,13 +124,15 @@ and audited (matrix in SQL `email_state_transition_ok`, TS mirror in lib/states.
 | `supabase/migrations/000_email_system_init.sql` | v1 baseline (historical; superseded by 001 on apply) |
 | `supabase/migrations/001_email_system_v2.sql` | **v2 architecture** — outbox, ledger, inbox, suppressions, tokens, state machine, registry, type-safe mapping, cron, RLS, v1→v2 data migration |
 | `supabase/migrations/002_business_defaults_and_producers.sql` | **GoRentals launch blueprint** — INR/IST business defaults (rate-cap day window), welcome-on-signup producer, weekly win-back tiers 30/60/90, owner-on-bookings + listings.city mapping, cron v3 (IST mornings), WEBHOOK_SECRET vault alias |
+| `supabase/migrations/003_gorentls_full_catalog.sql` | **GoRentls full catalog** — brand correction (GoRentls/gorentls.com config + subject lines + cron rename), 10 new templates (otp · kyc_submitted/approved/rejected/doc_expiring · refund_initiated/failed · deposit_released · payment_receipt/failed), OTP fastlane drain kick + supersede trigger, refund lifecycle trigger v3 (initiated/failed/issued), KYC producer with auto column-mapping (re-run after creating the KYC table) |
+| `engine/` | Ops dashboard (Vite/React). Demo tabs simulate the engine; the **⚡ Live Ops tab is REAL** — it drives the deployed edge fn (HEALTHCHECK/ENQUEUE/TRACE/REPLAY/DRAIN) over HTTP with the internal secret (`src/engine/apiClient.ts` + `liveCatalog.ts`) |
 | `emails/` | React Email **preview** templates (Next.js side; `npx email dev --dir emails`) with a drift-guard unit test against the sending templates |
 | `supabase/functions/notify-lifecycle/index.ts` | worker + operator API (DRAIN_QUEUE incl. reconciliation, PROCESS_EVENTS, ENQUEUE, TEST_SEND, TRACE, REPLAY, HEALTHCHECK, SCAN_*, DB_WEBHOOK) |
 | `supabase/functions/notify-lifecycle/lib/` | `templates.ts` (versioned renderers) · `schemas.ts` (Zod) · `resend.ts` (provider client + outcome taxonomy) · `retry.ts` (classification/backoff) · `ratelimit.ts` (token bucket) · `states.ts` (machine mirror) · `format.ts` (currency/tz) · `log.ts` (PII-safe structured logs) |
 | `app/api/resend-webhook/route.ts` | Svix-verified, size-bounded, persist-first webhook receiver |
 | `app/api/unsubscribe/route.ts` | GET confirm + POST one-click unsubscribe (signed tokens) |
 | `lib/supabase-rpc.ts` | shared server-side PostgREST client (no supabase-js realtime footgun) |
-| `tests/` | unit · db (22-test SQL suite) · integration (edge 56, routes 40) · e2e (25) · chaos (18 + claim + suppression race) · security (37) · `run_all.sh` = `npm test` |
+| `tests/` | unit · db (v2 22-test + v3 11-test SQL suites) · integration (edge + routes, real Deno↔PostgREST↔PG) · e2e (25) · chaos (18 + claim + suppression race) · security (37) · `run_all.sh` = `npm test` · CI: `.github/workflows/ci.yml` |
 | `scripts/` | `00_reconcile_schema.sql` (pre-deploy inspection) · `curl_tests.sh` (post-deploy) · `sign_webhook_test.mjs` · `test_harness_stubs.sql` · `kill_stale.sh` |
 | `SETUP.md` / `RUNBOOK.md` / `FAULT_INJECTION.md` / `AUDIT.md` | deploy · operations · failure matrix · v1 defect ledger |
 
@@ -152,8 +174,8 @@ and audited (matrix in SQL `email_state_transition_ok`, TS mirror in lib/states.
 
 | Suite | Assertions | Result |
 |---|---|---|
-| Unit (`node --test`, esbuild-transpiled libs) | 38 | ✅ |
-| Database (26-test SQL suite incl. welcome/win-back/IST, fresh + v1-upgraded + blueprint-variant DBs) | 29 checks | ✅ |
+| Unit (`node --test`, esbuild-transpiled libs) | 58 | ✅ |
+| Database (v2 22-test suite + v3 11-test GoRentls-catalog suite incl. OTP fastlane/supersede, KYC transitions, refund lifecycle, brand; fresh + v1-upgraded + blueprint-variant DBs) | 41 checks | ✅ |
 | Schema safety (§25 negative+positive on dedicated DBs) | 2 | ✅ |
 | Integration — edge worker (real Deno ↔ real PostgREST ↔ real PG ↔ mock Resend) | 67 | ✅ |
 | Integration — routes (webhook + unsubscribe) | 40 | ✅ |

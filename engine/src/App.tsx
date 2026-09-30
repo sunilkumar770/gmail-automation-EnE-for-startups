@@ -7,6 +7,7 @@ import { GmailConsole } from './components/GmailConsole.tsx';
 import { ObservabilityView } from './components/ObservabilityView.tsx';
 import { IntegrationGuide } from './components/IntegrationGuide.tsx';
 import { ReportViewer } from './components/ReportViewer.tsx';
+import { LiveOpsConsole } from './components/LiveOpsConsole.tsx';
 import { outboxEngine } from './engine/outbox.ts';
 import { gmailAdapter } from './engine/gmailAdapter.ts';
 import { emailEngine } from './engine/eventEmitter.ts';
@@ -139,6 +140,8 @@ export default function App() {
         {activeTab === 'observability' && <ObservabilityView />}
 
         {activeTab === 'sdk' && <IntegrationGuide />}
+
+        {activeTab === 'live' && <LiveOpsConsole />}
 
         {activeTab === 'report' && <ReportViewer />}
       </main>

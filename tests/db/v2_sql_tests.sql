@@ -683,13 +683,14 @@ do $$
 declare n int; leak int;
 begin
   if to_regnamespace('cron') is null then raise notice 'T21 SKIPPED: no cron'; return; end if;
-  select count(*) into n from cron.job where jobname like 'gorentals-email-%';
+  -- name-prefix agnostic: 003 renames gorentals-email-* → gorentls-email-*
+  select count(*) into n from cron.job where jobname like 'gorent%-email-%';
   assert n between 6 and 7, 'expected 6-7 cron jobs (6 pre-002, 7 with winback), got ' || n;
   if n = 7 then
-    assert exists (select 1 from cron.job where jobname='gorentals-email-winback'
+    assert exists (select 1 from cron.job where jobname like 'gorent%-email-winback'
                    and command like '%scan_winbacks(30)%' and command like '%scan_winbacks(90)%'),
            'winback cron missing tier scans';
-    assert exists (select 1 from cron.job where jobname='gorentals-email-queue-drain'
+    assert exists (select 1 from cron.job where jobname like 'gorent%-email-queue-drain'
                    and command like '%X-Webhook-Secret%'
                    and command like '%WEBHOOK_SECRET%'),
            'drain cron should carry the WEBHOOK_SECRET vault alias header';

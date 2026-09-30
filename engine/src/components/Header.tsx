@@ -20,13 +20,14 @@ export const Header: React.FC<HeaderProps> = ({
   queuedCount,
 }) => {
   const tabs = [
-    { id: 'dispatcher', label: 'Event Testbench & Chaos' },
-    { id: 'outbox', label: 'Transactional Outbox', badge: queuedCount > 0 ? queuedCount : null },
-    { id: 'templates', label: 'Template Studio' },
-    { id: 'gmail', label: 'Gmail API & Quotas' },
-    { id: 'observability', label: 'Observability & Audit' },
-    { id: 'sdk', label: 'Integration SDK' },
-    { id: 'report', label: '28-Phase Forensic Report' },
+    { id: 'dispatcher', label: 'Event Testbench & Chaos', badge: null },
+    { id: 'outbox', label: 'Transactional Outbox (demo)', badge: queuedCount > 0 ? queuedCount : null },
+    { id: 'templates', label: 'Template Studio', badge: null },
+    { id: 'gmail', label: 'Gmail API & Quotas (demo)', badge: null },
+    { id: 'observability', label: 'Observability & Audit', badge: null },
+    { id: 'sdk', label: 'Integration SDK', badge: null },
+    { id: 'live', label: '⚡ Live Ops (Real API)', badge: null },
+    { id: 'report', label: '28-Phase Forensic Report', badge: null },
   ];
 
   return (
@@ -90,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <span>{tab.label}</span>
-                {tab.badge !== null && (
+                {tab.badge != null && (
                   <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     {tab.badge}
                   </span>
