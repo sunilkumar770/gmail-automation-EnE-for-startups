@@ -279,7 +279,7 @@ __export(log_exports, {
   logWarn: () => logWarn,
   redact: () => redact
 });
-var HASH_SALT = "gorentals-email-log-v1";
+var HASH_SALT = "gorentls-email-log-v1";
 async function hashRecipient(email) {
   const data = new TextEncoder().encode(HASH_SALT + "|" + String(email).toLowerCase().trim());
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -289,9 +289,12 @@ function redact(value) {
   if (typeof value !== "string") return value;
   return value.replace(/(re_)[A-Za-z0-9_-]{6,}/g, "$1***").replace(/(whsec_)[A-Za-z0-9+/=_-]{6,}/g, "$1***").replace(/(eyJ)[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "jwt***").replace(/\bv1\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "unsub-token***");
 }
+var SECRET_FIELD_RE = /otp|passcode|password|secret|api[_-]?key|authorization|private[_-]?key/i;
 function log(level, fields) {
   const safe = {};
-  for (const [k, v] of Object.entries(fields)) safe[k] = redact(v);
+  for (const [k, v] of Object.entries(fields)) {
+    safe[k] = SECRET_FIELD_RE.test(k) ? "***" : redact(v);
+  }
   const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), level, svc: "notify-lifecycle", ...safe });
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
@@ -4358,6 +4361,9 @@ var uuid = external_exports.string().regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a
 var money = external_exports.union([external_exports.number().finite(), external_exports.string().regex(/^-?\d+(\.\d+)?$/)]);
 var currency = external_exports.string().regex(/^[A-Za-z]{3}$/, "ISO-4217 code expected");
 var tzName = external_exports.string().min(1).max(64);
+var httpsUrl = external_exports.string().max(2e3).refine((u) => /^https:\/\/[^\s"'<>]+$/i.test(u), "https:// URL expected");
+var dedupeKey = external_exports.string().min(1).max(120);
+var personName = external_exports.string().max(200).nullish();
 var bookingCore = {
   booking_id: uuid,
   listing_title: external_exports.string().max(300).nullish(),
@@ -4398,6 +4404,118 @@ var PAYLOAD_SCHEMAS = {
     user_id: uuid,
     name: external_exports.string().max(200).nullish(),
     renter_name: external_exports.string().max(200).nullish()
+  }),
+  // ---------------------------------------------------------------------
+  // v3 catalog (migration 003): auth · KYC · refund lifecycle · payments
+  // ---------------------------------------------------------------------
+  otp: external_exports.object({
+    user_id: uuid.nullish(),
+    dedupe_key: dedupeKey,
+    // challenge id — scopes the logical id
+    otp_code: external_exports.string().regex(/^[A-Za-z0-9]{4,10}$/, "4-10 alphanumeric characters expected"),
+    expiry_minutes: external_exports.number().int().min(1).max(1440).nullish(),
+    action_type: external_exports.string().max(120).nullish(),
+    name: personName,
+    renter_name: personName,
+    // App-layer hook (renderer ignores): when the email is suppressed/bounced,
+    // the caller may deliver the same challenge over SMS. Keeps the fallback
+    // decision with the business layer — the outbox stays email-only.
+    fallback_sms: external_exports.boolean().nullish()
+  }),
+  kyc_submitted: external_exports.object({
+    dedupe_key: dedupeKey,
+    // verification (attempt) id
+    user_id: uuid.nullish(),
+    name: personName,
+    renter_name: personName,
+    document_type: external_exports.string().max(120).nullish(),
+    cta_url: httpsUrl.nullish()
+  }),
+  kyc_approved: external_exports.object({
+    dedupe_key: dedupeKey,
+    user_id: uuid.nullish(),
+    name: personName,
+    renter_name: personName,
+    document_type: external_exports.string().max(120).nullish(),
+    cta_url: httpsUrl.nullish()
+  }),
+  kyc_rejected: external_exports.object({
+    dedupe_key: dedupeKey,
+    user_id: uuid.nullish(),
+    // required: a rejection without a reason is not actionable for the user
+    reason: external_exports.string().min(1).max(600),
+    name: personName,
+    renter_name: personName,
+    document_type: external_exports.string().max(120).nullish(),
+    cta_url: httpsUrl.nullish()
+  }),
+  kyc_doc_expiring: external_exports.object({
+    dedupe_key: dedupeKey,
+    // document id
+    campaign: external_exports.string().min(1).max(40),
+    // scan cycle — scopes the logical id (like win_back)
+    user_id: uuid.nullish(),
+    name: personName,
+    renter_name: personName,
+    document_type: external_exports.string().max(120).nullish(),
+    expiry_date: isoDatetime.nullish(),
+    timezone: tzName.nullish(),
+    cta_url: httpsUrl.nullish()
+  }),
+  refund_initiated: external_exports.object({
+    refund_id: uuid,
+    booking_id: uuid.nullish(),
+    amount: money,
+    // required: same corruption rule as refund_issued
+    currency: currency.nullish(),
+    renter_name: personName,
+    listing_title: external_exports.string().max(300).nullish(),
+    payment_method: external_exports.string().max(120).nullish(),
+    eta_days: external_exports.string().max(40).nullish()
+  }),
+  refund_failed: external_exports.object({
+    refund_id: uuid,
+    booking_id: uuid.nullish(),
+    amount: money.nullish(),
+    currency: currency.nullish(),
+    reason: external_exports.string().max(600).nullish(),
+    renter_name: personName,
+    listing_title: external_exports.string().max(300).nullish()
+  }),
+  deposit_released: external_exports.object({
+    booking_id: uuid,
+    amount: money,
+    currency: currency.nullish(),
+    renter_name: personName,
+    listing_title: external_exports.string().max(300).nullish(),
+    deductions: external_exports.string().max(600).nullish(),
+    eta_days: external_exports.string().max(40).nullish()
+  }),
+  payment_receipt: external_exports.object({
+    dedupe_key: dedupeKey,
+    // payment intent / charge id
+    amount: money,
+    currency: currency.nullish(),
+    renter_name: personName,
+    booking_id: uuid.nullish(),
+    listing_title: external_exports.string().max(300).nullish(),
+    invoice_id: external_exports.string().max(80).nullish(),
+    // signed, time-limited invoice PDF link minted by the app (decision:
+    // link over attachment — smaller outbox rows, download analytics)
+    invoice_url: httpsUrl.nullish(),
+    payment_method: external_exports.string().max(120).nullish(),
+    date: isoDatetime.nullish(),
+    timezone: tzName.nullish()
+  }),
+  payment_failed: external_exports.object({
+    dedupe_key: dedupeKey,
+    amount: money.nullish(),
+    currency: currency.nullish(),
+    reason: external_exports.string().max(600).nullish(),
+    renter_name: personName,
+    booking_id: uuid.nullish(),
+    listing_title: external_exports.string().max(300).nullish(),
+    retry_url: httpsUrl.nullish()
   })
 };
 function validatePayload(templateKey, payload) {
@@ -4437,13 +4555,29 @@ function sanitizeHeaderLine(s) {
 }
 var greeting = (p) => p.renter_name && p.renter_name !== "there" ? String(p.renter_name) : "there";
 var hostName = (p) => p.owner_name && p.owner_name !== "Host" ? String(p.owner_name) : "Host";
+var personName2 = (p) => {
+  const n = p.name ?? p.renter_name;
+  return n && n !== "there" ? String(n) : "there";
+};
 function bookingUrl(p, ctx) {
   return p.booking_id ? ctx.appUrl + "/bookings/" + encodeURIComponent(String(p.booking_id)) : ctx.appUrl;
 }
-function shell(opts) {
+function kycUrl(p, ctx) {
+  return typeof p.cta_url === "string" && p.cta_url.startsWith("https://") ? p.cta_url : ctx.appUrl + "/account/kyc";
+}
+function brandLogoHtml(ctx) {
+  const name = escapeHtml(ctx.brandName || "GoRentls");
+  if (/^Go[A-Z]/.test(ctx.brandName || "")) {
+    return 'Go<span style="color:#2dd4bf;">' + name.slice(2) + "</span>";
+  }
+  return name;
+}
+function shell(opts, ctx) {
+  const brand = ctx.brandName || "GoRentls";
+  const domain = ctx.brandDomain || "gorentls.com";
   const cta = opts.ctaText && opts.ctaUrl ? '<tr><td align="center" style="padding:24px 0;"><a href="' + escapeHtml(opts.ctaUrl) + '" style="background:#0d9488;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;display:inline-block;">' + escapeHtml(opts.ctaText) + "</a></td></tr>" : "";
-  const unsubLink = opts.marketing && opts.unsubUrl ? '<p style="margin:8px 0;"><a href="' + escapeHtml(opts.unsubUrl) + '" style="color:#94a3b8;text-decoration:underline;">Unsubscribe from non-essential emails</a></p>' : '<p style="margin:8px 0;color:#94a3b8;">This is a transactional message about your GoRentals activity.</p>';
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escapeHtml(opts.heading) + '</title></head><body style="margin:0;padding:0;background:#f1f5f9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + escapeHtml(opts.preheader) + '</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;"><tr><td style="background:#0f172a;padding:20px 32px;"><span style="color:#ffffff;font-size:20px;font-weight:bold;">Go<span style="color:#2dd4bf;">Rentals</span></span></td></tr><tr><td style="padding:32px;"><h1 style="margin:0 0 16px;font-size:20px;color:#0f172a;">' + escapeHtml(opts.heading) + '</h1><div style="font-size:15px;line-height:1.6;color:#334155;">' + opts.bodyHtml + "</div>" + cta + '</td></tr><tr><td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center;"><p style="margin:4px 0;">&copy; ' + (/* @__PURE__ */ new Date()).getUTCFullYear() + ' GoRentals &middot; <a href="https://gorentals.com" style="color:#94a3b8;">gorentals.com</a></p>' + unsubLink + "</td></tr></table></td></tr></table></body></html>";
+  const unsubLink = opts.marketing && opts.unsubUrl ? '<p style="margin:8px 0;"><a href="' + escapeHtml(opts.unsubUrl) + '" style="color:#94a3b8;text-decoration:underline;">Unsubscribe from non-essential emails</a></p>' : '<p style="margin:8px 0;color:#94a3b8;">This is a transactional message about your ' + escapeHtml(brand) + " activity.</p>";
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escapeHtml(opts.heading) + '</title></head><body style="margin:0;padding:0;background:#f1f5f9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + escapeHtml(opts.preheader) + '</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;"><tr><td style="background:#0f172a;padding:20px 32px;"><span style="color:#ffffff;font-size:20px;font-weight:bold;">' + brandLogoHtml(ctx) + '</span></td></tr><tr><td style="padding:32px;"><h1 style="margin:0 0 16px;font-size:20px;color:#0f172a;">' + escapeHtml(opts.heading) + '</h1><div style="font-size:15px;line-height:1.6;color:#334155;">' + opts.bodyHtml + "</div>" + cta + '</td></tr><tr><td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center;"><p style="margin:4px 0;">&copy; ' + (/* @__PURE__ */ new Date()).getUTCFullYear() + " " + escapeHtml(brand) + ' &middot; <a href="https://' + escapeHtml(domain) + '" style="color:#94a3b8;">' + escapeHtml(domain) + "</a></p>" + unsubLink + "</td></tr></table></td></tr></table></body></html>";
 }
 function detailsTable(rows) {
   const visible = rows.filter((r) => r[1] !== null && r[1] !== "" && r[1] !== "\u2014");
@@ -4454,12 +4588,18 @@ function detailsTable(rows) {
   }
   return html + "</table>";
 }
+function noticeBlock(text, tone = "warn") {
+  const colors = tone === "warn" ? "background:#fffbeb;border:1px solid #fcd34d;color:#92400e;" : "background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;";
+  return '<p style="margin:16px 0;padding:12px 16px;border-radius:8px;font-size:14px;' + colors + '">' + escapeHtml(text) + "</p>";
+}
 var money2 = (p, locale) => fmtMoney(p.amount, p.currency, locale);
 var din = (iso, p, locale) => fmtDateInTz(iso, p.timezone, locale);
 var listing = (p) => String(p.listing_title ?? "your rental");
+var safeUrl = (v) => typeof v === "string" && /^https:\/\/[^\s"'<>]+$/i.test(v) ? v : null;
 function unsubHeaders(ctx, recipient) {
   if (!ctx.unsubUrl) return void 0;
-  const mailto = "<mailto:unsubscribe@gorentals.com?subject=" + encodeURIComponent("unsubscribe " + recipient) + ">";
+  const unsubAddr = ctx.unsubscribeEmail || "unsubscribe@" + (ctx.brandDomain || "gorentls.com");
+  const mailto = "<mailto:" + unsubAddr + "?subject=" + encodeURIComponent("unsubscribe " + recipient) + ">";
   return {
     "List-Unsubscribe": mailto + ", <" + ctx.unsubUrl + ">",
     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
@@ -4472,15 +4612,15 @@ var v1 = {
     render: (p, ctx) => {
       const nm = String(p.name ?? p.renter_name ?? "there");
       return {
-        subject: sanitizeHeaderLine("Welcome to GoRentals, " + nm),
+        subject: sanitizeHeaderLine("Welcome to " + ctx.brandName + ", " + nm),
         html: shell({
           preheader: "Browse gear, book in a few taps, manage rentals in one dashboard.",
           heading: "Welcome, " + escapeHtml(nm) + " \u{1F44B}",
-          bodyHtml: "<p>Your GoRentals account is ready. You can now browse gear, book in a few taps, and manage every rental from one dashboard.</p>" + detailsTable([["Your account", nm === "there" ? null : nm]]),
+          bodyHtml: "<p>Your " + escapeHtml(ctx.brandName) + " account is ready. You can now browse gear, book in a few taps, and manage every rental from one dashboard.</p>" + detailsTable([["Your account", nm === "there" ? null : nm]]),
           ctaText: "Start browsing",
           ctaUrl: ctx.appUrl
-        }),
-        text: "Hi " + nm + ",\n\nWelcome to GoRentals! Your account is ready.\n\nBrowse rentals: " + ctx.appUrl + "\n\n\u2014 The GoRentals team"
+        }, ctx),
+        text: "Hi " + nm + ",\n\nWelcome to " + ctx.brandName + "! Your account is ready.\n\nBrowse rentals: " + ctx.appUrl + "\n\n\u2014 The " + ctx.brandName + " team"
       };
     }
   },
@@ -4488,7 +4628,7 @@ var v1 = {
     category: "transactional",
     critical: true,
     render: (p, ctx) => ({
-      subject: sanitizeHeaderLine("Confirmed \u2014 " + listing(p) + " on GoRentals"),
+      subject: sanitizeHeaderLine("Confirmed \u2014 " + listing(p) + " on " + ctx.brandName),
       html: shell({
         preheader: "Your booking is confirmed. Details inside.",
         heading: "You're all set, " + escapeHtml(greeting(p)) + "! \u{1F389}",
@@ -4501,8 +4641,8 @@ var v1 = {
         ]),
         ctaText: "View my booking",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + greeting(p) + ",\n\nYour GoRentals booking is CONFIRMED.\n\nListing:    " + listing(p) + "\nCheck-in:  " + din(p.starts_at, p, ctx.locale) + "\nCheck-out: " + din(p.ends_at, p, ctx.locale) + "\nTotal:     " + (money2(p, ctx.locale) ?? "-") + "\n\nManage your booking: " + bookingUrl(p, ctx) + "\n\n\u2014 The GoRentals team"
+      }, ctx),
+      text: "Hi " + greeting(p) + ",\n\nYour " + ctx.brandName + " booking is CONFIRMED.\n\nListing:    " + listing(p) + "\nCheck-in:  " + din(p.starts_at, p, ctx.locale) + "\nCheck-out: " + din(p.ends_at, p, ctx.locale) + "\nTotal:     " + (money2(p, ctx.locale) ?? "-") + "\n\nManage your booking: " + bookingUrl(p, ctx) + "\n\n\u2014 The " + ctx.brandName + " team"
     })
   },
   booking_host_confirmation: {
@@ -4522,8 +4662,8 @@ var v1 = {
         ]) + "<p>Please make sure the item is prepped and available for check-in.</p>",
         ctaText: "Manage this booking",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + hostName(p) + ",\n\nYour listing was just BOOKED.\n\nCheck-in:  " + din(p.starts_at, p, ctx.locale) + "\nCheck-out: " + din(p.ends_at, p, ctx.locale) + "\nValue:     " + (money2(p, ctx.locale) ?? "-") + "\n\nManage booking: " + bookingUrl(p, ctx) + "\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + hostName(p) + ",\n\nYour listing was just BOOKED.\n\nCheck-in:  " + din(p.starts_at, p, ctx.locale) + "\nCheck-out: " + din(p.ends_at, p, ctx.locale) + "\nValue:     " + (money2(p, ctx.locale) ?? "-") + "\n\nManage booking: " + bookingUrl(p, ctx) + "\n\n\u2014 " + ctx.brandName
     })
   },
   booking_request_owner: {
@@ -4537,8 +4677,8 @@ var v1 = {
         bodyHtml: "<p>A renter requested <strong>" + escapeHtml(listing(p)) + "</strong>. Requests that stay unanswered get cancelled automatically \u2014 please review it soon.</p>" + detailsTable([["Requested dates", din(p.starts_at, p, ctx.locale) + " \u2192 " + din(p.ends_at, p, ctx.locale)]]),
         ctaText: "Review request",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + hostName(p) + ",\n\nA renter requested your listing.\nDates: " + din(p.starts_at, p, ctx.locale) + " \u2192 " + din(p.ends_at, p, ctx.locale) + "\n\nReview it here: " + bookingUrl(p, ctx) + "\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + hostName(p) + ",\n\nA renter requested your listing.\nDates: " + din(p.starts_at, p, ctx.locale) + " \u2192 " + din(p.ends_at, p, ctx.locale) + "\n\nReview it here: " + bookingUrl(p, ctx) + "\n\n\u2014 " + ctx.brandName
     })
   },
   booking_cancelled_renter: {
@@ -4552,8 +4692,8 @@ var v1 = {
         bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", your booking of <strong>" + escapeHtml(listing(p)) + "</strong> has been cancelled.</p>" + detailsTable([["Listing", listing(p)], ["Original check-in", din(p.starts_at, p, ctx.locale)]]) + "<p>If a refund applies, it is processed automatically and you'll receive a separate confirmation within 5\u201310 business days.</p>",
         ctaText: "View booking",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + greeting(p) + ",\n\nYour booking was CANCELLED.\n\nIf a refund applies it will be issued automatically (5\u201310 business days).\n\nDetails: " + bookingUrl(p, ctx) + "\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + greeting(p) + ",\n\nYour booking was CANCELLED.\n\nIf a refund applies it will be issued automatically (5\u201310 business days).\n\nDetails: " + bookingUrl(p, ctx) + "\n\n\u2014 " + ctx.brandName
     })
   },
   booking_cancelled_owner: {
@@ -4567,8 +4707,8 @@ var v1 = {
         bodyHtml: "<p>The booking of <strong>" + escapeHtml(listing(p)) + "</strong> starting " + escapeHtml(din(p.starts_at, p, ctx.locale)) + " was cancelled. Your calendar has been reopened automatically.</p>",
         ctaText: "View listing",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + hostName(p) + ",\n\nA booking starting " + din(p.starts_at, p, ctx.locale) + " was CANCELLED. Your calendar is open again.\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + hostName(p) + ",\n\nA booking starting " + din(p.starts_at, p, ctx.locale) + " was CANCELLED. Your calendar is open again.\n\n\u2014 " + ctx.brandName
     })
   },
   refund_issued: {
@@ -4581,11 +4721,11 @@ var v1 = {
         html: shell({
           preheader: "We've issued your refund.",
           heading: "Your refund is on the way \u{1F4B8}",
-          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", we've issued a refund of <strong>" + escapeHtml(m ?? "the eligible amount") + "</strong> to your original payment method.</p>" + detailsTable([["Refund amount", m], ["Booking", String(p.listing_title ?? "-")], ["Expected arrival", "5\u201310 business days"]]) + "<p>Your bank may show it as <em>GO RENTALS</em> or similar on your statement.</p>",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", we've issued a refund of <strong>" + escapeHtml(m ?? "the eligible amount") + "</strong> to your original payment method.</p>" + detailsTable([["Refund amount", m], ["Booking", String(p.listing_title ?? "-")], ["Expected arrival", "5\u201310 business days"]]) + "<p>Your bank may show it as <em>" + escapeHtml(ctx.brandName.toUpperCase()) + "</em> or similar on your statement.</p>",
           ctaText: p.booking_id ? "View booking" : void 0,
           ctaUrl: p.booking_id ? bookingUrl(p, ctx) : void 0
-        }),
-        text: "Hi " + greeting(p) + ",\n\nWe've issued a refund of " + (m ?? "-") + ".\nExpect it within 5\u201310 business days on your original payment method.\n\n\u2014 GoRentals"
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nWe've issued a refund of " + (m ?? "-") + ".\nExpect it within 5\u201310 business days on your original payment method.\n\n\u2014 " + ctx.brandName
       };
     }
   },
@@ -4600,8 +4740,8 @@ var v1 = {
         bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", this is a friendly reminder that <strong>" + escapeHtml(listing(p)) + "</strong> starts " + escapeHtml(din(p.starts_at, p, ctx.locale)) + " (local time).</p>" + detailsTable([["Location", p.city ? String(p.city) : null], ["Check-in", din(p.starts_at, p, ctx.locale)], ["Check-out", din(p.ends_at, p, ctx.locale)]]) + "<p>Review the handover instructions on your booking page and contact the host early if anything is unclear.</p>",
         ctaText: "Check-in details",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + greeting(p) + ",\n\nReminder: your rental starts " + din(p.starts_at, p, ctx.locale) + " (local time).\n\nCheck-in details: " + bookingUrl(p, ctx) + "\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + greeting(p) + ",\n\nReminder: your rental starts " + din(p.starts_at, p, ctx.locale) + " (local time).\n\nCheck-in details: " + bookingUrl(p, ctx) + "\n\n\u2014 " + ctx.brandName
     })
   },
   access_instructions: {
@@ -4615,8 +4755,8 @@ var v1 = {
         bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", everything you need for pickup of <strong>" + escapeHtml(listing(p)) + "</strong> is on your booking page, including the host's contact details.</p>" + detailsTable([["Check-in", din(p.starts_at, p, ctx.locale)]]),
         ctaText: "Open instructions",
         ctaUrl: bookingUrl(p, ctx)
-      }),
-      text: "Hi " + greeting(p) + ",\n\nAccess instructions: " + bookingUrl(p, ctx) + "\n\n\u2014 GoRentals"
+      }, ctx),
+      text: "Hi " + greeting(p) + ",\n\nAccess instructions: " + bookingUrl(p, ctx) + "\n\n\u2014 " + ctx.brandName
     })
   },
   review_request: {
@@ -4628,13 +4768,13 @@ var v1 = {
       html: shell({
         preheader: "30 seconds of your time helps the whole community.",
         heading: "How did it go? \u2B50",
-        bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", you recently rented <strong>" + escapeHtml(listing(p)) + "</strong>. Honest reviews keep GoRentals trustworthy \u2014 would you take 30 seconds to rate it?</p>",
+        bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", you recently rented <strong>" + escapeHtml(listing(p)) + "</strong>. Honest reviews keep " + escapeHtml(ctx.brandName) + " trustworthy \u2014 would you take 30 seconds to rate it?</p>",
         ctaText: "Leave a review",
         ctaUrl: bookingUrl(p, ctx) + "?review=1",
         marketing: true,
         unsubUrl: ctx.unsubUrl
-      }),
-      text: "Hi " + greeting(p) + ",\n\nYou recently rented on GoRentals. Would you leave a quick review?\n\n" + bookingUrl(p, ctx) + "?review=1\n\n\u2014 GoRentals" + (ctx.unsubUrl ? "\n\nUnsubscribe: " + ctx.unsubUrl : "")
+      }, ctx),
+      text: "Hi " + greeting(p) + ",\n\nYou recently rented on " + ctx.brandName + ". Would you leave a quick review?\n\n" + bookingUrl(p, ctx) + "?review=1\n\n\u2014 " + ctx.brandName + (ctx.unsubUrl ? "\n\nUnsubscribe: " + ctx.unsubUrl : "")
     })
   },
   win_back: {
@@ -4646,14 +4786,222 @@ var v1 = {
       html: shell({
         preheader: "Fresh listings near you, ready to roll.",
         heading: "Ready for the next trip? \u{1F690}",
-        bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", it's been a while! New RVs, campers and gear are listed every day on GoRentals.</p>",
+        bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", it's been a while! New cameras, bikes, cars and event gear are listed every day on " + escapeHtml(ctx.brandName) + ".</p>",
         ctaText: "Browse rentals",
         ctaUrl: ctx.appUrl + "/listings",
         marketing: true,
         unsubUrl: ctx.unsubUrl
-      }),
+      }, ctx),
       text: "Hi " + greeting(p) + ",\n\nNew rentals are waiting for you: " + ctx.appUrl + "/listings" + (ctx.unsubUrl ? "\n\nUnsubscribe: " + ctx.unsubUrl : "")
     })
+  },
+  // -------------------------------------------------------------------------
+  // AUTHENTICATION — OTP (priority 1; fast-lane drained, see migration 003 §D)
+  // -------------------------------------------------------------------------
+  otp: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const code = String(p.otp_code ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 10);
+      const mins = Number.isFinite(Number(p.expiry_minutes)) && Number(p.expiry_minutes) > 0 ? Math.min(1440, Math.round(Number(p.expiry_minutes))) : 10;
+      const action = p.action_type ? String(p.action_type).slice(0, 120) : "verification";
+      return {
+        subject: sanitizeHeaderLine(code + " is your " + ctx.brandName + " verification code"),
+        html: shell({
+          preheader: "Your verification code \u2014 valid for " + mins + " minutes.",
+          heading: "Your verification code",
+          bodyHtml: "<p>Hi " + escapeHtml(personName2(p)) + ", use this code to complete <strong>" + escapeHtml(action) + `</strong>:</p><div style="margin:20px 0;text-align:center;"><span style="display:inline-block;font-size:32px;font-weight:bold;letter-spacing:8px;color:#0f172a;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:14px 28px;font-family:'Courier New',Courier,monospace;">` + escapeHtml(code) + "</span></div>" + detailsTable([["Expires in", mins + " minutes"], ["Request", action]]) + noticeBlock(ctx.brandName + " staff will NEVER ask you for this code. Didn't request it? Ignore this email \u2014 your account stays secure.", "warn")
+        }, ctx),
+        text: "Hi " + personName2(p) + ",\n\n" + code + " is your " + ctx.brandName + " verification code (" + action + ").\nIt expires in " + mins + " minutes.\n\n" + ctx.brandName + " staff will never ask for this code. Didn't request it? Ignore this email.\n\n\u2014 " + ctx.brandName
+      };
+    }
+  },
+  // -------------------------------------------------------------------------
+  // KYC LIFECYCLE
+  // -------------------------------------------------------------------------
+  kyc_submitted: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => ({
+      subject: sanitizeHeaderLine("Verification received \u2014 we're reviewing your documents"),
+      html: shell({
+        preheader: "Most reviews finish within 24\u201348 hours.",
+        heading: "Verification received \u{1F50D}",
+        bodyHtml: "<p>Hi " + escapeHtml(personName2(p)) + ", we've received your " + (p.document_type ? "<strong>" + escapeHtml(String(p.document_type)) + "</strong> " : "") + "documents. Our team is reviewing them now \u2014 most reviews finish within <strong>24\u201348 hours</strong>.</p>" + detailsTable([["Document", p.document_type ? String(p.document_type) : null], ["Status", "Under review"]]) + "<p>We'll email you the moment there's an update. No action needed from you right now.</p>",
+        ctaText: "Check verification status",
+        ctaUrl: kycUrl(p, ctx)
+      }, ctx),
+      text: "Hi " + personName2(p) + ",\n\nWe've received your verification documents and our team is reviewing them (usually 24\u201348 hours).\n\nStatus: " + kycUrl(p, ctx) + "\n\n\u2014 The " + ctx.brandName + " team"
+    })
+  },
+  kyc_approved: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => ({
+      subject: sanitizeHeaderLine("You're verified \u2705 \u2014 welcome aboard"),
+      html: shell({
+        preheader: "Identity verification complete. Full access unlocked.",
+        heading: "You're verified \u2705",
+        bodyHtml: "<p>Hi " + escapeHtml(personName2(p)) + ", your identity verification is <strong>complete</strong>. You now have full access to book rentals" + (p.document_type ? " and manage your " + escapeHtml(String(p.document_type)) : "") + " on " + escapeHtml(ctx.brandName) + ".</p>" + detailsTable([["Verification", "Approved"], ["Account", personName2(p) === "there" ? null : personName2(p)]]),
+        ctaText: "Browse rentals",
+        ctaUrl: safeUrl(p.cta_url) ?? ctx.appUrl + "/search"
+      }, ctx),
+      text: "Hi " + personName2(p) + ",\n\nYour " + ctx.brandName + " identity verification is APPROVED. You're all set to rent.\n\n" + (safeUrl(p.cta_url) ?? ctx.appUrl + "/search") + "\n\n\u2014 The " + ctx.brandName + " team"
+    })
+  },
+  kyc_rejected: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const reason = String(p.reason ?? "Your documents could not be verified. Please re-upload clear, valid documents.");
+      return {
+        subject: sanitizeHeaderLine("Action needed \u2014 your verification was not approved"),
+        html: shell({
+          preheader: "Re-upload your documents to continue using " + ctx.brandName + ".",
+          heading: "Action needed: verification unsuccessful \u26A0\uFE0F",
+          bodyHtml: "<p>Hi " + escapeHtml(personName2(p)) + ", unfortunately we couldn't approve your verification this time.</p>" + noticeBlock("Why: " + reason, "warn") + "<p>You can <strong>re-upload your documents</strong> right away \u2014 most re-submissions are approved on the next review. Make sure photos are well-lit, all four corners are visible, and details match your account.</p>" + detailsTable([["Document", p.document_type ? String(p.document_type) : null], ["Status", "Action needed"]]) + "<p>Questions? Reply to this email or write to " + escapeHtml(ctx.supportEmail) + " \u2014 we're happy to help.</p>",
+          ctaText: "Re-upload documents",
+          ctaUrl: kycUrl(p, ctx)
+        }, ctx),
+        text: "Hi " + personName2(p) + ",\n\nYour verification was NOT approved.\nReason: " + reason + "\n\nRe-upload your documents: " + kycUrl(p, ctx) + "\nNeed help? " + ctx.supportEmail + "\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  kyc_doc_expiring: {
+    category: "transactional",
+    critical: false,
+    render: (p, ctx) => {
+      const doc = String(p.document_type ?? "document");
+      return {
+        subject: sanitizeHeaderLine("Your " + doc + " expires soon \u2014 update it to keep renting"),
+        html: shell({
+          preheader: "Renew now to avoid interruptions to your bookings.",
+          heading: "Your " + escapeHtml(doc) + " expires soon \u{1F4C5}",
+          bodyHtml: "<p>Hi " + escapeHtml(personName2(p)) + ", your <strong>" + escapeHtml(doc) + "</strong> is nearing its expiry date. Upload the renewed copy now so your account stays verified and your bookings aren't interrupted.</p>" + detailsTable([["Document", doc], ["Expires on", p.expiry_date ? fmtDateInTz(p.expiry_date, p.timezone, ctx.locale) : null]]) + "<p>This only takes a minute \u2014 snap a photo and upload.</p>",
+          ctaText: "Update document",
+          ctaUrl: kycUrl(p, ctx)
+        }, ctx),
+        text: "Hi " + personName2(p) + ",\n\nYour " + doc + " expires soon. Upload the renewed copy to stay verified:\n" + kycUrl(p, ctx) + "\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  // -------------------------------------------------------------------------
+  // REFUND & DEPOSIT LIFECYCLE
+  // -------------------------------------------------------------------------
+  refund_initiated: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const m = money2(p, ctx.locale);
+      const eta = p.eta_days ? String(p.eta_days) + " business days" : "5\u201310 business days";
+      return {
+        subject: sanitizeHeaderLine("Refund initiated \u2014 " + (m ?? "your refund") + " is being processed"),
+        html: shell({
+          preheader: "We've started processing your refund.",
+          heading: "Your refund is on its way \u{1F4B8}",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", we've initiated a refund of <strong>" + escapeHtml(m ?? "the eligible amount") + "</strong> to your original payment method.</p>" + detailsTable([
+            ["Refund amount", m],
+            ["Booking", p.listing_title ? String(p.listing_title) : null],
+            ["Paid via", p.payment_method ? String(p.payment_method) : null],
+            ["Expected arrival", eta]
+          ]) + "<p>We'll email you again once the refund is issued. Timelines vary by bank/UPI provider.</p>",
+          ctaText: p.booking_id ? "View booking" : void 0,
+          ctaUrl: p.booking_id ? bookingUrl(p, ctx) : void 0
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nYour refund of " + (m ?? "-") + " has been INITIATED.\nExpected arrival: " + eta + " on your original payment method.\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  refund_failed: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const m = money2(p, ctx.locale);
+      const reason = p.reason ? String(p.reason) : "your payment provider could not accept the transfer";
+      return {
+        subject: sanitizeHeaderLine("Action needed \u2014 we couldn't send your refund"),
+        html: shell({
+          preheader: "Your money is safe, but we need your help to return it.",
+          heading: "We couldn't complete your refund \u26A0\uFE0F",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", our attempt to refund <strong>" + escapeHtml(m ?? "your money") + "</strong> failed because " + escapeHtml(reason) + ".</p>" + noticeBlock("Your money is safe with us \u2014 it has NOT been lost. We just need updated details or a retry to send it back.", "info") + detailsTable([["Refund amount", m], ["Booking", p.listing_title ? String(p.listing_title) : null]]) + "<p>Reply to this email or contact us at <strong>" + escapeHtml(ctx.supportEmail) + "</strong> and our team will resolve it with you \u2014 usually within one business day.</p>",
+          ctaText: "Contact support",
+          ctaUrl: "mailto:" + ctx.supportEmail + "?subject=" + encodeURIComponent("Refund failed" + (p.refund_id ? " \u2014 " + String(p.refund_id).slice(0, 8) : ""))
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nYour refund of " + (m ?? "-") + " FAILED (" + reason + "). Your money is safe with us.\n\nContact us right away: " + ctx.supportEmail + "\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  deposit_released: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const m = money2(p, ctx.locale);
+      const eta = p.eta_days ? String(p.eta_days) + " business days" : "3\u20137 business days";
+      return {
+        subject: sanitizeHeaderLine("Security deposit released \u2014 " + (m ?? "refund on the way")),
+        html: shell({
+          preheader: "Your deposit is coming back to you.",
+          heading: "Security deposit released \u{1F513}",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", your rental has been returned and inspected \u2014 we've released your security deposit of <strong>" + escapeHtml(m ?? "the full deposit") + "</strong>.</p>" + detailsTable([
+            ["Released amount", m],
+            ["Booking", p.listing_title ? String(p.listing_title) : null],
+            ["Deductions", p.deductions ? String(p.deductions) : "None"],
+            ["Expected arrival", eta]
+          ]) + "<p>If any deduction looks wrong, reply to this email within 48 hours and we'll review it with you.</p>",
+          ctaText: "View booking",
+          ctaUrl: bookingUrl(p, ctx)
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nYour security deposit of " + (m ?? "-") + " has been RELEASED (arrival: " + eta + ").\n" + (p.deductions ? "Deductions: " + String(p.deductions) + "\n" : "") + "\nBooking: " + bookingUrl(p, ctx) + "\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  // -------------------------------------------------------------------------
+  // PAYMENTS
+  // -------------------------------------------------------------------------
+  payment_receipt: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const m = money2(p, ctx.locale);
+      const invoiceUrl = safeUrl(p.invoice_url);
+      return {
+        subject: sanitizeHeaderLine("Payment received \u2014 " + (m ?? "receipt inside")),
+        html: shell({
+          preheader: "Thanks! Your payment is confirmed.",
+          heading: "Payment received \u2705",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", we've received your payment of <strong>" + escapeHtml(m ?? "the amount due") + "</strong>. Thank you!</p>" + detailsTable([
+            ["Amount", m],
+            ["Invoice", p.invoice_id ? String(p.invoice_id) : null],
+            ["Paid via", p.payment_method ? String(p.payment_method) : null],
+            ["Paid on", p.date ? fmtDateInTz(p.date, p.timezone, ctx.locale) : null],
+            ["Booking", p.listing_title ? String(p.listing_title) : null]
+          ]),
+          ctaText: invoiceUrl ? "Download invoice (PDF)" : p.booking_id ? "View booking" : void 0,
+          ctaUrl: invoiceUrl ?? (p.booking_id ? bookingUrl(p, ctx) : void 0)
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nPayment received: " + (m ?? "-") + "\n" + (p.invoice_id ? "Invoice: " + String(p.invoice_id) + "\n" : "") + (invoiceUrl ? "\nDownload invoice (PDF): " + invoiceUrl + "\n" : "") + "\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
+  },
+  payment_failed: {
+    category: "transactional",
+    critical: true,
+    render: (p, ctx) => {
+      const m = money2(p, ctx.locale);
+      const reason = p.reason ? String(p.reason) : "your payment provider declined the charge";
+      const retryUrl = safeUrl(p.retry_url) ?? (p.booking_id ? bookingUrl(p, ctx) : ctx.appUrl);
+      return {
+        subject: sanitizeHeaderLine("Payment failed \u2014 action needed to keep your booking"),
+        html: shell({
+          preheader: "Retry now to avoid losing your reservation.",
+          heading: "Payment failed \u26A0\uFE0F",
+          bodyHtml: "<p>Hi " + escapeHtml(greeting(p)) + ", we couldn't process your payment" + (m ? " of <strong>" + escapeHtml(m) + "</strong>" : "") + " because " + escapeHtml(reason) + ".</p>" + noticeBlock("If this payment was for a pending booking, the reservation may be released if the payment isn't completed soon.", "warn") + detailsTable([["Amount due", m], ["Booking", p.listing_title ? String(p.listing_title) : null]]) + "<p>Try a different card/UPI handle, or contact us at " + escapeHtml(ctx.supportEmail) + " if the problem persists.</p>",
+          ctaText: "Retry payment",
+          ctaUrl: retryUrl
+        }, ctx),
+        text: "Hi " + greeting(p) + ",\n\nYour payment" + (m ? " of " + m : "") + " FAILED (" + reason + ").\nRetry now to keep your booking: " + retryUrl + "\n\n\u2014 The " + ctx.brandName + " team"
+      };
+    }
   }
 };
 var TEMPLATES = {
@@ -4667,7 +5015,18 @@ var TEMPLATES = {
   booking_reminder: { 1: v1.booking_reminder },
   access_instructions: { 1: v1.access_instructions },
   review_request: { 1: v1.review_request },
-  win_back: { 1: v1.win_back }
+  win_back: { 1: v1.win_back },
+  // v3 catalog (migration 003): auth, KYC, refund lifecycle, payments
+  otp: { 1: v1.otp },
+  kyc_submitted: { 1: v1.kyc_submitted },
+  kyc_approved: { 1: v1.kyc_approved },
+  kyc_rejected: { 1: v1.kyc_rejected },
+  kyc_doc_expiring: { 1: v1.kyc_doc_expiring },
+  refund_initiated: { 1: v1.refund_initiated },
+  refund_failed: { 1: v1.refund_failed },
+  deposit_released: { 1: v1.deposit_released },
+  payment_receipt: { 1: v1.payment_receipt },
+  payment_failed: { 1: v1.payment_failed }
 };
 function getTemplate(key, version) {
   const versions = TEMPLATES[key];

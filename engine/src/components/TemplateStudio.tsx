@@ -43,7 +43,7 @@ export const TemplateStudio: React.FC = () => {
   if (validation.valid && !parseError) {
     try {
       const res = renderEmail(selectedKey, parsedData, {
-        tenantName: 'GoRentals',
+        tenantName: 'GoRentls',
       });
       renderedHtml = res.html;
       renderedText = res.text;

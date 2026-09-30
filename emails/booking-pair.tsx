@@ -100,7 +100,7 @@ export function ReviewRequestEmail(p: PreviewProps & { reviewHref?: string; unsu
       unsubHref={p.unsubHref}
     >
       <Text style={{ fontSize: 15, lineHeight: "24px", color: "#3f3f46" }}>
-        {`Hi ${p.name}, you recently rented on GoRentals. Honest reviews keep the community trustworthy — would you take 30 seconds to rate it?`}
+        {`Hi ${p.name}, you recently rented on GoRentls. Honest reviews keep the community trustworthy — would you take 30 seconds to rate it?`}
       </Text>
     </Layout>
   );
@@ -117,7 +117,7 @@ export function WinBackEmail(p: PreviewProps & { unsubHref?: string }) {
       unsubHref={p.unsubHref}
     >
       <Text style={{ fontSize: 15, lineHeight: "24px", color: "#3f3f46" }}>
-        {`Hi ${p.name}, it's been a while! New RVs, campers and gear are listed every day on GoRentals.`}
+        {`Hi ${p.name}, it's been a while! New cameras, bikes, cars and event gear are listed every day on GoRentls.`}
       </Text>
     </Layout>
   );

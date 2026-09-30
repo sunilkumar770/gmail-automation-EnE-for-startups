@@ -1,4 +1,4 @@
-# GoRentals Email System v2 — Operational Runbook
+# GoRentls Email System v2+v3 — Operational Runbook
 
 Owner: on-call engineer. Daily check ≈ 2 minutes. All SQL/curl copy-pasteable.
 `$FN` = `https://<ref>.supabase.co/functions/v1/notify-lifecycle`,
@@ -31,7 +31,7 @@ SQL sweep:
 ```sql
 select j.jobname, r.status, left(coalesce(r.return_message,''),60), r.start_time
 from cron.job_run_details r join cron.job j on j.jobid=r.jobid
-where j.jobname like 'gorentals-email-%' and r.start_time > now() - interval '1 hour'
+where j.jobname like 'gorentls-email-%' and r.start_time > now() - interval '1 hour'
 order by r.start_time desc;                              -- 12+ succeeded drain runs expected
 
 select id, status_code, left(content::text,120) from net._http_response
@@ -82,7 +82,7 @@ select public.email_unsuppress('customer@example.com');        -- false-positive
 update email_config set value='2' where key='review_campaign_version';  -- re-run review asks legitimately
 update email_config set value='0' where key='daily_soft_cap';           -- suspend marketing only
 update email_config set value='off' where key='enqueue_source';         -- pause ALL new intents
-update cron.job set active=false where jobname like 'gorentals-email-%';-- pause everything
+update cron.job set active=false where jobname like 'gorentls-email-%';-- pause everything
 ```
 
 Retention runs daily 03:00 (`email_cleanup`): processed provider events > 90 d
@@ -108,8 +108,8 @@ cleanup 03:00 UTC · reminder 03:30 UTC (09:00 IST) · review 03:35 UTC
 Retune example:
 
 ```sql
-select cron.schedule_in_database('gorentals-email-booking-reminder','0 1 * * *', command, database)
-from cron.job where jobname='gorentals-email-booking-reminder';
+select cron.schedule_in_database('gorentls-email-booking-reminder','0 1 * * *', command, database)
+from cron.job where jobname='gorentls-email-booking-reminder';
 ```
 
 **Win-back operations:** tiers target users idle in `[N, N+7)` days — the
@@ -194,6 +194,37 @@ From/Return-Path DKIM-aligned? DMARC aggregate reports passing? Marketing
 keeps `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
 (never strip them); multipart text part present; new domains ramp ~2×/week
 (the 85/day soft cap enforces week-1 discipline automatically).
+
+### 4.9 OTP slow or missing (fastlane, 003 §D)
+Priority-1 rows get an immediate async `DRAIN_QUEUE` kick on insert; the */5
+cron is only the backstop. Diagnose in order:
+```sql
+-- 1) did the row enqueue at all, and at what priority/state?
+select state, priority, attempts, next_attempt_at, left(audit_log::text, 200)
+from email_outbox where template_key='otp' order by created_at desc limit 5;
+-- 2) is the kick wired? (edge_function_url set, fastlane on, pg_net present)
+select public.email_cfg('edge_function_url'), public.email_cfg('fastlane_enabled');
+select count(*) from net._http_response where created > now() - interval '10 minutes';
+```
+Common causes: `next_attempt_at` in the future ⇒ **daily hard cap reached**
+(even critical mail parks +15 min at the cap — raise caps for your Resend
+plan, 003 §I); state `SUPPRESSED` ⇒ the address bounced/complained earlier
+(app should fall back to SMS for auth codes); repeated `RETRY_WAIT` ⇒ check
+`email_send_attempts.error_class` (429 storm? bad key?). Note: a newer OTP
+**cancels** older queued ones (`by='system:otp-supersede'` in `audit_log`) —
+`CANCELLED` otp rows next to a fresh one are correct behaviour, not loss.
+Kill-switch for the kick alone: `fastlane_enabled='false'` (SETUP §Rollback).
+
+### 4.10 KYC emails not firing (003 §F)
+The producer attaches only if a known verification table existed when 003
+ran. Check: `select public.email_cfg('kyc_table');` — empty ⇒ create/rename
+your table into the candidate list (or adjust 003 §F) and **re-run 003**
+(idempotent). Statuses recognized: submitted/pending/in_review/… →
+`kyc_submitted`; approved/verified/… → `kyc_approved`; rejected/declined/… →
+`kyc_rejected` (empty reason column falls back to generic re-upload copy).
+Admin review UIs may also enqueue directly via the edge-fn `ENQUEUE` action —
+use an explicit `p_logical_event_id` suffix (e.g. `:R2`) when re-notifying the
+same verification row after a second review cycle.
 
 ## 5. Escalation
 

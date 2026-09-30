@@ -100,8 +100,9 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const req = h.resendState.requests.find((r) => r.to === "sec3@itest.local");
   const hrefs = [...(req?.html ?? "").matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
   // first-party = APP_URL under test (gorentals.test) or the brand footer
-  // (gorentals.com) or mailto unsubscribe — nothing attacker-controllable.
-  const firstParty = (u) => u.startsWith("https://gorentals.test/") || u === "https://gorentals.com" || u.startsWith("mailto:");
+  // (gorentls.com) or mailto unsubscribe — nothing attacker-controllable.
+  // NOTE: legacy gorentals.com is deliberately NOT allowed (migration 003 rebrand).
+  const firstParty = (u) => u.startsWith("https://gorentals.test/") || u === "https://gorentls.com" || u.startsWith("mailto:");
   check("all rendered hrefs are first-party (no javascript:/attacker URLs)",
     hrefs.length > 0 && hrefs.every(firstParty),
     hrefs.join(" | "));
@@ -119,7 +120,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
 
   // forged: valid-looking headers, signature by wrong key
   const evil = new Webhook("whsec_" + Buffer.from("attacker-key-32-bytes-minimum!!!").toString("base64"));
-  const rForged = await webhookPOST(new NextRequest("https://gorentals.com/api/resend-webhook", {
+  const rForged = await webhookPOST(new NextRequest("https://gorentls.com/api/resend-webhook", {
     method: "POST",
     headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": evil.sign(id, ts, goodBody) },
     body: goodBody,
@@ -129,13 +130,13 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
 
   // unsigned garbage → 400, no rows
   const nBefore = psqlOne("select count(*) from email_provider_events");
-  const rGarbage = await webhookPOST(new NextRequest("https://gorentals.com/api/resend-webhook", {
+  const rGarbage = await webhookPOST(new NextRequest("https://gorentls.com/api/resend-webhook", {
     method: "POST", headers: { "content-type": "application/json" }, body: "{\"type\":\"email.bounced\"}",
   }));
   check("unsigned garbage → 400 + zero rows", rGarbage.status === 400 && psqlOne("select count(*) from email_provider_events") === nBefore);
 
   // honest replay: sign once, deliver 5× sequentially → 1 row (concurrent covered in chaos)
-  const req = new NextRequest("https://gorentals.com/api/resend-webhook", {
+  const req = new NextRequest("https://gorentls.com/api/resend-webhook", {
     method: "POST",
     headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": goodSig },
     body: goodBody,
@@ -143,7 +144,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const first = await webhookPOST(req);
   let dupes = 0;
   for (let i = 0; i < 4; i++) {
-    const rq = new NextRequest("https://gorentals.com/api/resend-webhook", {
+    const rq = new NextRequest("https://gorentls.com/api/resend-webhook", {
       method: "POST",
       headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": goodSig },
       body: goodBody,
@@ -173,7 +174,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const aParts = tokA.split(".");
   const bParts = tokB.split(".");
   const swapped = `v1.${aParts[1]}.${bParts[2]}`;
-  const rSwap = await unsubPOST(new NextRequest("https://gorentals.com/api/unsubscribe?t=" + swapped, { method: "POST" }));
+  const rSwap = await unsubPOST(new NextRequest("https://gorentls.com/api/unsubscribe?t=" + swapped, { method: "POST" }));
   check("payload/signature swap between users → 400", rSwap.status === 400, String(rSwap.status));
   check("swap attack suppressed NOBODY", psqlOne("select count(*) from email_suppressions where removed_at is null and email in ('alice@itest.local','bob@itest.local')") === "0");
 
@@ -181,11 +182,11 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const sigBytes = Buffer.from(bParts[2].replace(/-/g, "+").replace(/_/g, "/"), "base64");
   sigBytes[5] ^= 0xff;
   const flipped = `v1.${bParts[1]}.${sigBytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
-  const rFlip = await unsubPOST(new NextRequest("https://gorentals.com/api/unsubscribe?t=" + flipped, { method: "POST" }));
+  const rFlip = await unsubPOST(new NextRequest("https://gorentls.com/api/unsubscribe?t=" + flipped, { method: "POST" }));
   check("single-bit-flipped signature → 400", rFlip.status === 400, String(rFlip.status));
 
   // honest B token works and only affects B
-  const rB = await unsubPOST(new NextRequest("https://gorentals.com/api/unsubscribe?t=" + encodeURIComponent(tokB), { method: "POST" }));
+  const rB = await unsubPOST(new NextRequest("https://gorentls.com/api/unsubscribe?t=" + encodeURIComponent(tokB), { method: "POST" }));
   check("valid token → 200", rB.status === 200, String(rB.status));
   check("only the token's owner suppressed", psqlOne("select email from email_suppressions where removed_at is null and email in ('alice@itest.local','bob@itest.local')") === "bob@itest.local");
 
@@ -193,7 +194,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const bodies = new Set();
   for (let i = 0; i < 20; i++) {
     const fake = `v1.${Buffer.from(JSON.stringify({ e: `probe${i}@victim.example`, s: "marketing", i: 1 })).toString("base64url")}.${bParts[2]}`;
-    const r = await unsubGET(new NextRequest("https://gorentals.com/api/unsubscribe?t=" + encodeURIComponent(fake)));
+    const r = await unsubGET(new NextRequest("https://gorentls.com/api/unsubscribe?t=" + encodeURIComponent(fake)));
     bodies.add(r.status + "|" + (await r.text()).length);
   }
   check("20 forged-token probes → single identical response class (no oracle)", bodies.size === 1, [...bodies].join(","));

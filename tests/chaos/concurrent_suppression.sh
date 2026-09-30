@@ -11,7 +11,8 @@ DB="${TEST_DB:-gr_v2_it}"
 ROUNDS="${ROUNDS:-20}"
 FAILS=0
 
-q() { su postgres -c "psql -d $DB -tA -q -c \"$1\"" 2>/dev/null; }
+if [ "${PG_SU_MODE:-su}" = "sudo" ]; then SU_PG=(sudo -u postgres bash -c); else SU_PG=(su postgres -c); fi
+q() { "${SU_PG[@]}" "psql -d $DB -tA -q -c \"$1\"" 2>/dev/null; }
 
 for i in $(seq 1 "$ROUNDS"); do
   EMAIL="race$i@itest.local"

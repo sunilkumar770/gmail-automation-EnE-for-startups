@@ -20,11 +20,11 @@ An exhaustive inspection of the target repository (\`sunilkumar770/gmail-automat
 * **Database Layer (\`supabase/migrations/\`)**:
   - \`000_email_system_init.sql\` (v1 baseline: rudimentary tables \`email_queue\`, \`email_log\`, trigger procedures)
   - \`001_email_system_v2.sql\` (v2 migration: introducing \`email_outbox\`, \`email_send_attempts\`, \`email_templates\`, \`email_provider_events\`, state machine)
-  - \`002_business_defaults_and_producers.sql\` (GoRentals launch defaults, currency/timezone defaults, win-back tiers)
+  - \`002_business_defaults_and_producers.sql\` (business launch defaults, currency/timezone defaults, win-back tiers)
 * **Execution & Worker (\`supabase/functions/notify-lifecycle/\`)**:
   - \`index.ts\`: Edge worker with Deno runtime calling Supabase PostgREST RPC and executing \`DRAIN_QUEUE\`
   - \`lib/resend.ts\`: Direct client calling \`api.resend.com/emails\` via fetch with \`RESEND_API_KEY\`
-  - \`lib/templates.ts\`: HTML string renderers hardcoded with GoRentals branding
+  - \`lib/templates.ts\`: HTML string renderers - branding config-driven since migration 003 (GoRentls)
   - \`lib/retry.ts\`, \`lib/ratelimit.ts\`, \`lib/schemas.ts\`, \`lib/states.ts\`
 * **Web Routes (\`app/api/\`)**:
   - \`app/api/resend-webhook/route.ts\`: Next.js webhook receiver for Resend/Svix events

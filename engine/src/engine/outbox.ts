@@ -182,7 +182,7 @@ export class OutboxEngine {
 
       // Step 2: Render Template
       const rendered = renderEmail(row.templateKey, row.payload, {
-        tenantName: row.tenant === 'gorentls' ? 'GoRentals' : row.tenant.toUpperCase(),
+        tenantName: row.tenant === 'gorentls' ? 'GoRentls' : row.tenant.toUpperCase(),
       });
 
       // Step 3: Dispatch through Gmail API Adapter

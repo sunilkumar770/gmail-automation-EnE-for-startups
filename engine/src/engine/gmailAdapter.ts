@@ -26,7 +26,7 @@ export interface GmailSendResult {
 
 export class GmailAdapter {
   private config: GmailAccountConfig = {
-    connectedEmail: 'automation@gorentals.example',
+    connectedEmail: 'automation@gorentls.com',
     accountType: 'WORKSPACE',
     dailyQuotaLimit: 2000,
     dailyQuotaUsed: 42,
@@ -34,8 +34,8 @@ export class GmailAdapter {
     oauthStatus: 'CONNECTED',
     tokenExpiresAt: new Date(Date.now() + 3200 * 1000).toISOString(),
     scopes: ['https://www.googleapis.com/auth/gmail.send'],
-    senderName: 'GoRentals Notifications',
-    replyToEmail: 'support@gorentals.example',
+    senderName: 'GoRentls Notifications',
+    replyToEmail: 'support@gorentls.com',
   };
 
   private faultConfig: FaultInjectionConfig = {
@@ -75,7 +75,7 @@ export class GmailAdapter {
    */
   public buildMimeMessage(params: GmailSendParams): { rawMime: string; rfc822MessageId: string; base64Url: string } {
     const boundary = '====_Boundary_' + Math.random().toString(36).substring(2) + '_' + Date.now();
-    const rfc822MessageId = `<${Date.now()}.${Math.random().toString(36).substring(2, 8)}@${this.config.connectedEmail.split('@')[1] || 'gorentals.com'}>`;
+    const rfc822MessageId = `<${Date.now()}.${Math.random().toString(36).substring(2, 8)}@${this.config.connectedEmail.split('@')[1] || 'gorentls.com'}>`;
     const dateStr = new Date().toUTCString();
 
     const fromFormatted = params.fromName ? `"${params.fromName.replace(/"/g, '')}" <${params.from}>` : params.from;

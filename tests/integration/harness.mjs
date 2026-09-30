@@ -24,6 +24,15 @@ export const JWT_SECRET = "test-jwt-secret-0123456789abcdef0123456789abcdef";
 export const INTERNAL_SECRET = "itest-internal-secret-value";
 
 // ---------------------------------------------------------------------------
+// OS-user switch for postgres tooling: default `su postgres -c <cmd>` (local
+// dev as root). CI (GitHub runners: passwordless sudo, no su password) sets
+// PG_SU_MODE=sudo → `sudo -u postgres bash -c <cmd>`. Same contract either way.
+// ---------------------------------------------------------------------------
+const SU_MODE = process.env.PG_SU_MODE === "sudo" ? "sudo" : "su";
+const suCmd = (cmd) =>
+  SU_MODE === "sudo" ? ["-u", "postgres", "bash", "-c", cmd] : ["postgres", "-c", cmd];
+
+// ---------------------------------------------------------------------------
 // JWT (HS256) — what Supabase's service_role key is
 // ---------------------------------------------------------------------------
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
@@ -46,8 +55,8 @@ export function psql(sql, opts = {}) {
   chmodSync(file, 0o644);   // postgres user must be able to read it
   chmodSync(dir, 0o755);
   try {
-    const out = execFileSync("su", ["postgres", "-c",
-      `psql -d ${DB_NAME} -tA -q -v ON_ERROR_STOP=1 ${opts.noStop ? "" : ""}-f ${file}`],
+    const out = execFileSync(SU_MODE,
+      suCmd(`psql -d ${DB_NAME} -tA -q -v ON_ERROR_STOP=1 ${opts.noStop ? "" : ""}-f ${file}`),
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return out.trim();
   } finally {
@@ -101,15 +110,15 @@ async function waitForPort(port, ms = 20000) {
 export function ensureTestDb() {
   const exists = (() => {
     try {
-      const out = execFileSync("su", ["postgres", "-c",
-        `psql -tAc "select count(*) from pg_database where datname='${DB_NAME}'"`],
+      const out = execFileSync(SU_MODE,
+        suCmd(`psql -tAc "select count(*) from pg_database where datname='${DB_NAME}'"`),
         { encoding: "utf8" }).trim();
       return out === "1";
     } catch { return false; }
   })();
   if (!exists) {
     console.log(`[harness] creating ${DB_NAME} …`);
-    execFileSync("su", ["postgres", "-c", `createdb ${DB_NAME}`], { stdio: "ignore" });
+    execFileSync(SU_MODE, suCmd(`createdb ${DB_NAME}`), { stdio: "ignore" });
   }
   // Always (re-)apply the full migration chain: every migration is idempotent,
   // and this guarantees the test DB matches the repo even after new migrations
@@ -118,9 +127,10 @@ export function ensureTestDb() {
   for (const f of ["scripts/test_harness_stubs.sql",
                    "supabase/migrations/000_email_system_init.sql",
                    "supabase/migrations/001_email_system_v2.sql",
-                   "supabase/migrations/002_business_defaults_and_producers.sql"]) {
-    execFileSync("su", ["postgres", "-c",
-      `psql -d ${DB_NAME} -q -v ON_ERROR_STOP=1 -f ${resolve(PROJECT_ROOT, f)}`],
+                   "supabase/migrations/002_business_defaults_and_producers.sql",
+                   "supabase/migrations/003_gorentls_full_catalog.sql"]) {
+    execFileSync(SU_MODE,
+      suCmd(`psql -d ${DB_NAME} -q -v ON_ERROR_STOP=1 -f ${resolve(PROJECT_ROOT, f)}`),
       { stdio: "ignore" });
   }
 }
@@ -144,7 +154,7 @@ export async function startHarness() {
     "",
   ].join("\n"));
   chmodSync(conf, 0o644);   // postgres must read the config
-  const pgrst = spawn("su", ["postgres", "-c", `/usr/local/bin/postgrest ${conf}`], { stdio: "ignore" });
+  const pgrst = spawn(SU_MODE, suCmd(`/usr/local/bin/postgrest ${conf}`), { stdio: "ignore" });
   if (!await waitForPort(PGRST_PORT)) throw new Error("PostgREST did not start");
 
   // ---- /rest/v1 proxy (mimics Supabase Kong path layout) ----
@@ -309,7 +319,7 @@ export async function spawnEdge(port, h, overrides = {}) {
         EMAIL_INTERNAL_SECRET: INTERNAL_SECRET,
         RESEND_API_KEY: "re_test_key",
         RESEND_API_URL: h.resendUrl,
-        RESEND_FROM_EMAIL: "GoRentals <bookings@gorentals.com>",
+        RESEND_FROM_EMAIL: "GoRentls <bookings@gorentls.com>",
         APP_URL: "https://gorentals.test",
         RATE_RPS: "200", RATE_BURST: "50",     // fast tests; bucket still exercised
         RESEND_TIMEOUT_MS: "3000",

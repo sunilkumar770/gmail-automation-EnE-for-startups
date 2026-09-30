@@ -16,8 +16,8 @@ const { POST: webhookPOST, GET: webhookGET } = await import("../.build/route-web
 const { GET: unsubGET, POST: unsubPOST } = await import("../.build/route-unsub.mjs");
 const { NextRequest } = await import("next/server.js");
 
-const WEBHOOK_URL = "https://gorentals.com/api/resend-webhook";
-const UNSUB_URL = "https://gorentals.com/api/unsubscribe";
+const WEBHOOK_URL = "https://gorentls.com/api/resend-webhook";
+const UNSUB_URL = "https://gorentls.com/api/unsubscribe";
 const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
 
 function signRequest(bodyStr, opts = {}) {
@@ -208,7 +208,7 @@ const ev = (type, over = {}) => JSON.stringify({
   const getUrl = `${UNSUB_URL}?t=${encodeURIComponent(token)}`;
   const rg = await unsubGET(new NextRequest(getUrl));
   const rgBody = await rg.text();
-  check("GET valid token → 200 confirmation page (no side effect)", rg.status === 200 && /Unsubscribe from GoRentals marketing/i.test(rgBody), String(rg.status));
+  check("GET valid token → 200 confirmation page (no side effect)", rg.status === 200 && /Unsubscribe from GoRentls marketing/i.test(rgBody), String(rg.status));
   check("GET did NOT suppress yet", psqlOne("select count(*) from email_suppressions where email='unsub.test@itest.local' and removed_at is null") === "0");
 
   // invalid variants — identical responses (enumeration-proof)

@@ -68,4 +68,12 @@ await esbuild.build({
   external: ["next/server.js"],
 });
 
+// downloadInvoice: browser-side helper; html2pdf.js stays external (lazy runtime import)
+await esbuild.build({
+  ...common,
+  entryPoints: [resolve(root, "lib/downloadInvoice.ts")],
+  outfile: resolve(out, "downloadInvoice.mjs"),
+  external: ["html2pdf.js"],
+});
+
 console.log("build ok →", out);

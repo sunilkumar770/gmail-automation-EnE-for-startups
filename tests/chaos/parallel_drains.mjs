@@ -75,7 +75,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
   const id = "itest-chaos-storm-1";
   const ts = new Date();
   const sig = wh.sign(id, ts, payload);
-  const mk = () => webhookPOST(new NextRequest("https://gorentals.com/api/resend-webhook", {
+  const mk = () => webhookPOST(new NextRequest("https://gorentls.com/api/resend-webhook", {
     method: "POST",
     headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": sig },
     body: payload,
@@ -108,7 +108,7 @@ const wh = new Webhook(process.env.RESEND_WEBHOOK_SECRET);
     const id = `itest-chaos-ooo-${i}`;
     const ts = new Date();
     const sig = wh.sign(id, ts, payload);
-    return webhookPOST(new NextRequest("https://gorentals.com/api/resend-webhook", {
+    return webhookPOST(new NextRequest("https://gorentls.com/api/resend-webhook", {
       method: "POST",
       headers: { "content-type": "application/json", "svix-id": id, "svix-timestamp": String(Math.floor(ts.getTime() / 1000)), "svix-signature": sig },
       body: payload,

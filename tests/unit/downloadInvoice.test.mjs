@@ -94,7 +94,7 @@ globalThis.URL.revokeObjectURL = () => {};
 const document = globalThis.document;
 
 // Dynamic import of downloadInvoice
-const { downloadInvoice } = await import('../../lib/downloadInvoice.ts');
+const { downloadInvoice } = await import('../.build/downloadInvoice.mjs');
 
 test('Rule 3 Guard: throws when templateElement is null or undefined', async () => {
   await assert.rejects(

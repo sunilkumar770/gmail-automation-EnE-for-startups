@@ -4,7 +4,8 @@
 // Master spec §29: every log line is JSON with correlation fields; recipients
 // appear ONLY as salted hashes; secrets/tokens/full bodies are never logged.
 
-const HASH_SALT = "gorentals-email-log-v1"; // fixed salt: stable correlation, still one-way
+const HASH_SALT = "gorentls-email-log-v1"; // fixed salt: stable correlation, still one-way
+// NOTE: salt renamed gorentals→gorentls pre-launch (no historical hashes to correlate).
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -45,9 +46,14 @@ export function redact(value: unknown): unknown {
     .replace(/\bv1\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "unsub-token***");
 }
 
+/** Field names whose VALUES are secrets regardless of content (OTP codes, …). */
+const SECRET_FIELD_RE = /otp|passcode|password|secret|api[_-]?key|authorization|private[_-]?key/i;
+
 export function log(level: LogLevel, fields: LogFields): void {
   const safe: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(fields)) safe[k] = redact(v);
+  for (const [k, v] of Object.entries(fields)) {
+    safe[k] = SECRET_FIELD_RE.test(k) ? "***" : redact(v);
+  }
   const line = JSON.stringify({ ts: new Date().toISOString(), level, svc: "notify-lifecycle", ...safe });
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
