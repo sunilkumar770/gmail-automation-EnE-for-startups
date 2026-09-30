@@ -44,8 +44,8 @@ jobs:
         run: |
           sudo systemctl start postgresql.service
           sudo -u postgres psql -tAc "select version()"
-          chmod o+rx $GITHUB_WORKSPACE
-          chmod -R o+rX $GITHUB_WORKSPACE/supabase $GITHUB_WORKSPACE/scripts $GITHUB_WORKSPACE/tests
+          chmod 755 /home/runner /home/runner/work /home/runner/work/gmail-automation-EnE-for-startups
+          chmod -R o+rX $GITHUB_WORKSPACE
 
       - name: Install PostgREST 12 (integration harness)
         run: |
