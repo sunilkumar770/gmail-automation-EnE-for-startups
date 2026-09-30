@@ -11,7 +11,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const rootPosix = root.replace(/\\/g, "/");
 const out = resolve(root, "tests/.build");
 mkdirSync(out, { recursive: true });
 
@@ -24,13 +23,13 @@ const barrel = resolve(out, "lib-entry.ts");
 writeFileSync(
   barrel,
   [
-    `export * from "${rootPosix}/supabase/functions/notify-lifecycle/lib/format.ts";`,
-    `export * as states from "${rootPosix}/supabase/functions/notify-lifecycle/lib/states.ts";`,
-    `export * as retry from "${rootPosix}/supabase/functions/notify-lifecycle/lib/retry.ts";`,
-    `export * as ratelimit from "${rootPosix}/supabase/functions/notify-lifecycle/lib/ratelimit.ts";`,
-    `export * as log from "${rootPosix}/supabase/functions/notify-lifecycle/lib/log.ts";`,
-    `export * as schemas from "${rootPosix}/supabase/functions/notify-lifecycle/lib/schemas.ts";`,
-    `export * as templates from "${rootPosix}/supabase/functions/notify-lifecycle/lib/templates.ts";`,
+    `export * from "../../supabase/functions/notify-lifecycle/lib/format.ts";`,
+    `export * as states from "../../supabase/functions/notify-lifecycle/lib/states.ts";`,
+    `export * as retry from "../../supabase/functions/notify-lifecycle/lib/retry.ts";`,
+    `export * as ratelimit from "../../supabase/functions/notify-lifecycle/lib/ratelimit.ts";`,
+    `export * as log from "../../supabase/functions/notify-lifecycle/lib/log.ts";`,
+    `export * as schemas from "../../supabase/functions/notify-lifecycle/lib/schemas.ts";`,
+    `export * as templates from "../../supabase/functions/notify-lifecycle/lib/templates.ts";`,
   ].join("\n"),
 );
 
