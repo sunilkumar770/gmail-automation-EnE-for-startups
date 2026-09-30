@@ -88,8 +88,10 @@ globalThis.window = {
   requestAnimationFrame: (cb) => setTimeout(cb, 1),
 };
 globalThis.URL = globalThis.URL || {};
-globalThis.URL.createObjectURL = (blob) => 'blob:mock-url-' + Math.random();
+globalThis.URL.createObjectURL = (_blob) => 'blob:mock-url-' + Math.random();
 globalThis.URL.revokeObjectURL = () => {};
+
+const document = globalThis.document;
 
 // Dynamic import of downloadInvoice
 const { downloadInvoice } = await import('../../lib/downloadInvoice.ts');
@@ -157,11 +159,9 @@ test('DOM Leak Guard: ensures staging container is removed even if rasterization
   attachedNode.textContent = 'Valid text but html2pdf will fail';
   document.body.appendChild(attachedNode);
 
-  const initialBodyChildrenCount = document.body.children.length;
-
   try {
     await downloadInvoice(attachedNode, 'test.pdf');
-  } catch (err) {
+  } catch {
     // Expected to fail rasterization or threshold in mock environment
   }
 
